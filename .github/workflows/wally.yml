@@ -1,0 +1,57 @@
+name: Publish Wally package
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing stable release tag to publish (for example v0.1.0)
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+    secrets:
+      WALLY_AUTH_TOKEN:
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: wally-${{ inputs.tag }}
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate stable tag and matching manifest versions
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          python scripts/release.py validate "$TAG"
+          test "$(git rev-parse "refs/tags/$TAG^{commit}")" = "$(git rev-parse HEAD)"
+          if [[ "$TAG" == *-* ]]; then
+            echo "Publish prerelease packages manually; this workflow accepts stable versions."
+            exit 1
+          fi
+      - name: Require an existing published GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: test "$(gh release view "$TAG" --json isDraft --jq '.isDraft')" = 'false'
+      - uses: CompeyDev/setup-rokit@v0.2.1
+        with:
+          version: v1.2.0
+      - run: mkdir -p test/tooling
+      - run: wally package --project-path imposter-render --output test/tooling/imposter-render.zip
+      - name: Publish registry package
+        env:
+          WALLY_AUTH_TOKEN: ${{ secrets.WALLY_AUTH_TOKEN }}
+        run: python scripts/publish_wally.py

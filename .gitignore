@@ -6,6 +6,10 @@
 **/mutants.out*/
 rustc-ice-*.txt
 
+# Python release tooling bytecode
+__pycache__/
+*.py[cod]
+
 # Downloaded assets, generated tooling, and ad hoc exports
 /.imposter-cache/
 /test/tooling/

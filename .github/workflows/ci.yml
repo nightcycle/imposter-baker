@@ -1,31 +1,127 @@
 name: CI
-on: [push, pull_request, workflow_dispatch]
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      bake_demos:
+        description: Also download public model assets and verify demo bakes
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      ref:
+        description: Exact ref to validate when called by a release
+        type: string
+        default: ''
+      bake_demos:
+        type: boolean
+        default: false
 permissions:
   contents: read
+concurrency:
+  group: ci-${{ github.workflow }}-${{ inputs.ref || github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
 jobs:
+  workflows:
+    name: Workflow lint
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: docker://rhysd/actionlint:1.7.12
+        with:
+          args: -color -shellcheck=
   rust:
+    name: Rust (${{ matrix.os }})
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-22.04, windows-2022, macos-15]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
       - run: cargo fmt --check
       - run: cargo test --locked --all-targets
       - run: cargo clippy --locked --all-targets -- -D warnings
-  luau:
+      - name: Bake demo fixtures (optional network integration)
+        if: inputs.bake_demos && matrix.os == 'ubuntu-22.04'
+        run: cargo test --locked --test baking demo_models -- --ignored
+      - uses: actions/upload-artifact@v4
+        if: inputs.bake_demos && matrix.os == 'ubuntu-22.04'
+        with:
+          name: demo-bakes
+          path: test/demo/
+          if-no-files-found: error
+  msrv:
+    name: Rust 1.90 compatibility
     runs-on: ubuntu-22.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - uses: CompeyDev/setup-rokit@v0.1.2
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: dtolnay/rust-toolchain@1.90.0
+      - run: cargo check --locked --all-targets
+  release-tools:
+    name: Release tooling tests
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m unittest discover -s test -p test_release.py
+  luau:
+    name: Strict Luau and runtime package
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: CompeyDev/setup-rokit@v0.2.1
+        with:
+          version: v1.2.0
       - run: mkdir -p test/tooling
-      - run: curl --fail --location https://luau-lsp.pages.dev/type-definitions/globalTypes.None.d.luau --output test/tooling/roblox.d.luau
+      - run: curl --fail --location --retry 3 https://luau-lsp.pages.dev/type-definitions/globalTypes.None.d.luau --output test/tooling/roblox.d.luau
       - run: rojo sourcemap default.project.json --output test/tooling/sourcemap.json
       - run: luau-lsp analyze --definitions=@roblox=test/tooling/roblox.d.luau --sourcemap=test/tooling/sourcemap.json --platform=roblox imposter-render/src test/luau
       - run: stylua --check imposter-render/src test/luau test/run.luau
       - run: lune run test/run.luau
       - run: wally package --project-path imposter-render --output test/tooling/imposter-render.zip
       - run: rojo build imposter-render/default.project.json --output test/tooling/imposter-render.rbxm
+      - uses: actions/upload-artifact@v4
+        with:
+          name: checked-runtime
+          path: |
+            test/tooling/imposter-render.zip
+            test/tooling/imposter-render.rbxm
+          if-no-files-found: error
+  complete:
+    name: CI complete
+    if: always()
+    needs: [workflows, rust, msrv, release-tools, luau]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every validation job to pass
+        env:
+          RESULTS: ${{ join(needs.*.result, ',') }}
+        run: |
+          if [[ "$RESULTS" != "success,success,success,success,success" ]]; then
+            echo "Validation did not pass: $RESULTS"
+            exit 1
+          fi

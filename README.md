@@ -18,7 +18,7 @@ cargo build --locked --release
 cargo install --locked --path .
 ```
 
-To distribute through [Rokit](https://github.com/rojo-rbx/rokit), push a version tag matching `Cargo.toml`, such as `v0.1.0`. The release workflow tests and creates ZIPs containing the executable at the archive root for Windows x86_64, Linux x86_64/ARM64, and macOS Intel/ARM64. It also attaches the Wally package and a standalone runtime RBXM.
+To distribute through [Rokit](https://github.com/rojo-rbx/rokit), push a version tag matching both package manifests and `Cargo.lock`, such as `v0.1.0`. The release workflow waits for full CI, then creates ZIPs containing the executable at the archive root for Windows x86_64, Linux x86_64/ARM64, and macOS Intel/ARM64. It also attaches the Wally package, a standalone runtime RBXM, and SHA-256 checksums. See the [release guide](.github/RELEASING.md) for tagging, prereleases, manual runs, and optional automatic Wally publishing.
 
 After that GitHub release has been published, consumers can install it with:
 
@@ -111,6 +111,8 @@ cargo run --locked -- test/grass.rbxm test/demo/grass-shots --offline
 ```
 
 On Windows, `./test/check.ps1` runs Rust tests, Clippy, formatting, strict Roblox Luau analysis, pure runtime tests, Wally packaging, and Rojo build. It downloads Roblox type definitions if absent. CI runs the same checks on Linux and tests Rust on Windows/macOS too.
+
+CI also checks the minimum supported Rust version, release tooling, and workflow syntax. Run `python -m unittest discover -s test -p test_release.py` locally with Python 3.11+ to validate the release helpers. Dependabot checks Rust dependencies and GitHub Actions weekly.
 
 `test/luau/Renderer.spec.luau` is the Studio integration test for the real EditableMesh/EditableImage lifecycle. It creates an unparented test container and destroys it. With the test project synced and editable assets enabled, invoke `require(game.ReplicatedStorage.ImposterTests["Renderer.spec"])()` from Studio's command bar. It does not replace or hide the original models.
 

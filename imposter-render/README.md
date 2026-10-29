@@ -11,7 +11,7 @@ wally package --project-path imposter-render --output imposter-render.zip
 rojo build imposter-render/default.project.json --output imposter-render.rbxm
 ```
 
-To publish the registry package, authenticate with Wally and run `wally publish` inside this directory. Once published, consumers add:
+To publish the registry package, authenticate with Wally and run `wally publish` inside this directory. GitHub Actions also supports manual or automatic stable-version registry publication using `WALLY_AUTH_TOKEN`; see the [release guide](../.github/RELEASING.md). Once published, consumers add:
 
 ```toml
 [dependencies]
