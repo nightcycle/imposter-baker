@@ -29,7 +29,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
       - uses: docker://rhysd/actionlint:1.7.12
@@ -44,7 +44,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
       - uses: dtolnay/rust-toolchain@stable
@@ -63,7 +63,7 @@ jobs:
           mkdir -p test/tooling
           rojo build demo.project.json --output test/tooling/demo-base.rbxl
           cargo run --locked --example build_demo -- test/tooling/demo-base.rbxl test/tooling/demo.rbxl
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: matrix.os == 'ubuntu-22.04'
         with:
           name: demo-place
@@ -72,7 +72,7 @@ jobs:
       - name: Bake demo fixtures (optional network integration)
         if: inputs.bake_demos && matrix.os == 'ubuntu-22.04'
         run: cargo test --locked --test baking demo_models -- --ignored
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: inputs.bake_demos && matrix.os == 'ubuntu-22.04'
         with:
           name: demo-bakes
@@ -83,20 +83,20 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
-      - uses: dtolnay/rust-toolchain@1.90.0
+      - uses: dtolnay/rust-toolchain@1.120.0
       - run: cargo check --locked --all-targets
   release-tools:
     name: Release tooling tests
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - run: python -m unittest discover -s test -p test_release.py
@@ -105,7 +105,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
       - uses: CompeyDev/setup-rokit@v0.2.1
@@ -121,7 +121,7 @@ jobs:
       - run: lune run test/run.luau
       - run: wally package --project-path imposter-render --output test/tooling/imposter-render.zip
       - run: rojo build imposter-render/default.project.json --output test/tooling/imposter-render.rbxm
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: checked-runtime
           path: |
