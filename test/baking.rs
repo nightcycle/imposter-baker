@@ -158,7 +158,7 @@ fn tilt_offset_attributes_bake_top_down_and_round_trip_layouts() {
     assert!(
         fs::read_to_string(tmp.path().join("top.imposter.luau"))
             .unwrap()
-            .contains("tiltOffset = 90")
+            .contains("TiltOffset = 90")
     );
     let exported: serde_json::Value =
         serde_json::from_slice(&fs::read(tmp.path().join("top.imposter.json")).unwrap()).unwrap();

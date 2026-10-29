@@ -1,30 +1,30 @@
 --!strict
 local Atlas = {}
 
-export type Rect = { position: Vector2, size: Vector2 }
-export type Allocator = { size: number, free: { Rect } }
+export type Rect = { Position: Vector2, Size: Vector2 }
+export type Allocator = { Size: number, Free: { Rect } }
 
-function Atlas.new(size: number): Allocator
-	return { size = size, free = { { position = Vector2.zero, size = Vector2.one * size } } }
+function Atlas.New(size: number): Allocator
+	return { Size = size, Free = { { Position = Vector2.zero, Size = Vector2.one * size } } }
 end
 
-function Atlas.allocate(allocator: Allocator, size: Vector2): Rect?
-	for i, rect in allocator.free do
-		if size.X <= rect.size.X and size.Y <= rect.size.Y then
-			table.remove(allocator.free, i)
-			local result = { position = rect.position, size = size }
-			local dx = rect.size.X - size.X
-			local dy = rect.size.Y - size.Y
+function Atlas.Allocate(allocator: Allocator, size: Vector2): Rect?
+	for i, rect in allocator.Free do
+		if size.X <= rect.Size.X and size.Y <= rect.Size.Y then
+			table.remove(allocator.Free, i)
+			local result = { Position = rect.Position, Size = size }
+			local dx = rect.Size.X - size.X
+			local dy = rect.Size.Y - size.Y
 			if dx > 0 then
 				table.insert(
-					allocator.free,
-					{ position = rect.position + Vector2.new(size.X, 0), size = Vector2.new(dx, size.Y) }
+					allocator.Free,
+					{ Position = rect.Position + Vector2.new(size.X, 0), Size = Vector2.new(dx, size.Y) }
 				)
 			end
 			if dy > 0 then
 				table.insert(
-					allocator.free,
-					{ position = rect.position + Vector2.new(0, size.Y), size = Vector2.new(rect.size.X, dy) }
+					allocator.Free,
+					{ Position = rect.Position + Vector2.new(0, size.Y), Size = Vector2.new(rect.Size.X, dy) }
 				)
 			end
 			return result
@@ -33,37 +33,37 @@ function Atlas.allocate(allocator: Allocator, size: Vector2): Rect?
 	return nil
 end
 
-function Atlas.release(allocator: Allocator, rect: Rect)
-	table.insert(allocator.free, rect)
+function Atlas.Release(allocator: Allocator, rect: Rect)
+	table.insert(allocator.Free, rect)
 	-- Merge adjoining free rectangles so unload/reload does not monotonically
 	-- consume atlas capacity. Existing allocations never move.
 	local changed = true
 	while changed do
 		changed = false
-		for i = 1, #allocator.free do
-			local a = allocator.free[i]
-			for j = i + 1, #allocator.free do
-				local b = allocator.free[j]
+		for i = 1, #allocator.Free do
+			local a = allocator.Free[i]
+			for j = i + 1, #allocator.Free do
+				local b = allocator.Free[j]
 				local merged: Rect? = nil
-				if a.position.Y == b.position.Y and a.size.Y == b.size.Y then
-					if a.position.X + a.size.X == b.position.X or b.position.X + b.size.X == a.position.X then
+				if a.Position.Y == b.Position.Y and a.Size.Y == b.Size.Y then
+					if a.Position.X + a.Size.X == b.Position.X or b.Position.X + b.Size.X == a.Position.X then
 						merged = {
-							position = Vector2.new(math.min(a.position.X, b.position.X), a.position.Y),
-							size = Vector2.new(a.size.X + b.size.X, a.size.Y),
+							Position = Vector2.new(math.min(a.Position.X, b.Position.X), a.Position.Y),
+							Size = Vector2.new(a.Size.X + b.Size.X, a.Size.Y),
 						}
 					end
-				elseif a.position.X == b.position.X and a.size.X == b.size.X then
-					if a.position.Y + a.size.Y == b.position.Y or b.position.Y + b.size.Y == a.position.Y then
+				elseif a.Position.X == b.Position.X and a.Size.X == b.Size.X then
+					if a.Position.Y + a.Size.Y == b.Position.Y or b.Position.Y + b.Size.Y == a.Position.Y then
 						merged = {
-							position = Vector2.new(a.position.X, math.min(a.position.Y, b.position.Y)),
-							size = Vector2.new(a.size.X, a.size.Y + b.size.Y),
+							Position = Vector2.new(a.Position.X, math.min(a.Position.Y, b.Position.Y)),
+							Size = Vector2.new(a.Size.X, a.Size.Y + b.Size.Y),
 						}
 					end
 				end
 				if merged then
-					table.remove(allocator.free, j)
-					table.remove(allocator.free, i)
-					table.insert(allocator.free, merged)
+					table.remove(allocator.Free, j)
+					table.remove(allocator.Free, i)
+					table.insert(allocator.Free, merged)
 					changed = true
 					break
 				end

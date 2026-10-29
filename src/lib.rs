@@ -248,7 +248,7 @@ pub fn bake(scene: &scene::Scene, output: &Path, options: &BakeOptions) -> Resul
         fs::write(
             staging.join(luau_name),
             format!(
-                "--!strict\n-- Generated bake layout. Upload PNGs and supply their Content/asset URLs separately.\nreturn table.freeze({{\n\tpanShotCount = {},\n\ttiltShotCount = {},\n\tmaxResolutionPx = {},\n\tpaddingPx = {},\n\ttiltConstraints = NumberRange.new({}, {}),\n\ttiltOffset = {},\n}})\n",
+                "--!strict\n-- Generated bake layout. Upload PNGs and supply their Content/asset URLs separately.\nreturn table.freeze({{\n\tPanShotCount = {},\n\tTiltShotCount = {},\n\tMaxResolutionPx = {},\n\tPaddingPx = {},\n\tTiltConstraints = NumberRange.new({}, {}),\n\tTiltOffset = {},\n}})\n",
                 s.pan_shot_count,
                 s.tilt_shot_count,
                 s.max_resolution_px,

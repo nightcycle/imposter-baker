@@ -12,20 +12,24 @@ local globals = {
 	Instance = roblox.Instance,
 }
 local modules = {}
-for _, name in { "Util", "Limits", "Atlas", "Scheduler" } do
+for _, name in { "Util", "Limits", "Atlas", "Scheduler", "Lod" } do
 	modules[name] =
 		luau.load(fs.readFile(`imposter-render/src/{name}.luau`), { debugName = name, environment = globals })()
 end
+modules.Scene = luau.load(fs.readFile("demo/src/shared/Scene.luau"), { debugName = "Scene", environment = globals })()
 local testGlobals = table.clone(globals)
 testGlobals.game = {
 	GetService = function()
-		return { ImposterRender = { Util = "Util", Limits = "Limits", Atlas = "Atlas", Scheduler = "Scheduler" } }
+		return {
+			ImposterRender = { Util = "Util", Limits = "Limits", Atlas = "Atlas", Scheduler = "Scheduler", Lod = "Lod" },
+			Demo = { Scene = "Scene" },
+		}
 	end,
 }
 testGlobals.require = function(name: string)
 	return modules[name]
 end
-for _, name in { "Util", "Scheduler" } do
+for _, name in { "Util", "Scheduler", "Lod", "Scene" } do
 	local test =
 		luau.load(fs.readFile(`test/luau/{name}.spec.luau`), { debugName = `{name}.spec`, environment = testGlobals })()
 	test()

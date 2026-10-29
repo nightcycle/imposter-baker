@@ -1,10 +1,10 @@
 --!strict
 -- Generated bake layout. Upload PNGs and supply their Content/asset URLs separately.
 return table.freeze({
-	panShotCount = 8,
-	tiltShotCount = 1,
-	maxResolutionPx = 252,
-	paddingPx = 2,
-	tiltConstraints = NumberRange.new(-180, 180),
-	tiltOffset = 0,
+	PanShotCount = 8,
+	TiltShotCount = 1,
+	MaxResolutionPx = 252,
+	PaddingPx = 2,
+	TiltConstraints = NumberRange.new(-180, 180),
+	TiltOffset = 0,
 })

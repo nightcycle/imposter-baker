@@ -4,8 +4,11 @@ local Util = require(script.Util)
 local Limits = require(script.Limits)
 local Atlas = require(script.Atlas)
 local Scheduler = require(script.Scheduler)
+local InstanceCache = require(script.InstanceCache)
+local Lod = require(script.Lod)
 
-local ImposterRender = { Util = Util, Limits = Limits, Atlas = Atlas, Scheduler = Scheduler }
+local ImposterRender =
+	{ Util = Util, Limits = Limits, Atlas = Atlas, Scheduler = Scheduler, InstanceCache = InstanceCache, Lod = Lod }
 
 export type Layout = Util.Layout
 export type LayoutInput = Util.LayoutInput
@@ -15,80 +18,108 @@ export type LimitOptions = Limits.Options
 export type Budget = Limits.Budget
 export type UpdateBudgetInput = Scheduler.BudgetInput
 export type UpdateBudget = Scheduler.Budget
+export type LodOptions = Lod.Options
+export type LodConfig = Lod.Config
+export type InstanceCacheOptions = InstanceCache.Options
+export type TemplateOptions = InstanceCache.TemplateOptions
 export type Layer = "color" | "normal" | "roughness" | "metalness" | "emissive"
 export type ImageContent = Content | string
 export type Source = ImageContent | { [string]: ImageContent }
 export type Sources = {
-	color: Source,
-	normal: Source?,
-	roughness: Source?,
-	metalness: Source?,
-	emissive: Source?,
+	Color: Source,
+	Normal: Source?,
+	Roughness: Source?,
+	Metalness: Source?,
+	Emissive: Source?,
 }
 export type Options = {
-	limits: LimitOptions?,
-	parent: Instance?,
-	origin: CFrame?,
-	layers: { Layer }?,
-	emissiveStrength: number?,
-	emissiveTint: Color3?,
-	updateBudget: UpdateBudgetInput?,
+	Limits: LimitOptions?,
+	Parent: Instance?,
+	Origin: CFrame?,
+	Layers: { Layer }?,
+	EmissiveStrength: number?,
+	EmissiveTint: Color3?,
+	UpdateBudget: UpdateBudgetInput?,
+	Lod: LodOptions?,
+	InstanceCache: InstanceCacheOptions?,
 }
 export type Usage = {
-	models: number,
-	instances: number,
-	editableMeshes: number,
-	editableImages: number,
-	texturePixels: number,
-	reservedTransientPixels: number,
-	pendingInstances: number,
-	checkedInstances: number,
-	updatedInstances: number,
-	updateMilliseconds: number,
+	Models: number,
+	Instances: number,
+	EditableMeshes: number,
+	EditableImages: number,
+	TexturePixels: number,
+	ReservedTransientPixels: number,
+	PendingInstances: number,
+	CheckedInstances: number,
+	UpdatedInstances: number,
+	UpdateMilliseconds: number,
+	RealInstances: number,
+	CachedInstances: number,
+	BulkMovedParts: number,
+	LodTransitions: number,
 }
 export type Handle = {
-	update: (self: Handle, boundingBoxCFrame: CFrame, boundingBoxSize: Vector3) -> (),
-	destroy: (self: Handle) -> (),
+	Update: (self: Handle, boundingBoxCFrame: CFrame, boundingBoxSize: Vector3) -> (),
+	SetLodEnabled: (self: Handle, enabled: boolean) -> (),
+	GetRealInstance: (self: Handle) -> Model?,
+	Destroy: (self: Handle) -> (),
 }
 export type Renderer = {
-	mesh: EditableMesh,
-	part: MeshPart,
-	images: { [string]: EditableImage },
-	limits: Budget,
-	updateBudget: UpdateBudget,
-	register: (self: Renderer, id: string, sources: Sources, layout: LayoutInput?) -> (boolean, string?),
-	unregister: (self: Renderer, id: string) -> (boolean, string?),
-	add: (self: Renderer, id: string, boundingBoxCFrame: CFrame, boundingBoxSize: Vector3) -> (Handle?, string?),
-	update: (self: Renderer, cameraCFrame: CFrame, verticalFieldOfView: number, availableMilliseconds: number?) -> (),
-	setUpdateBudget: (self: Renderer, input: UpdateBudgetInput) -> (),
-	setLimits: (self: Renderer, options: LimitOptions) -> (boolean, string?),
-	getUsage: (self: Renderer) -> Usage,
-	destroy: (self: Renderer) -> (),
+	Mesh: EditableMesh,
+	Part: MeshPart,
+	Images: { [string]: EditableImage },
+	Limits: Budget,
+	UpdateBudget: UpdateBudget,
+	Lod: LodConfig,
+	Register: (self: Renderer, id: string, sources: Sources, layout: LayoutInput?) -> (boolean, string?),
+	Unregister: (self: Renderer, id: string) -> (boolean, string?),
+	Add: (self: Renderer, id: string, boundingBoxCFrame: CFrame, boundingBoxSize: Vector3) -> (Handle?, string?),
+	Update: (self: Renderer, cameraCFrame: CFrame, verticalFieldOfView: number, availableMilliseconds: number?) -> (),
+	SetUpdateBudget: (self: Renderer, input: UpdateBudgetInput) -> (),
+	SetLodOptions: (self: Renderer, input: LodOptions) -> (),
+	RegisterTemplate: (self: Renderer, id: string, template: Instance, options: TemplateOptions?) -> (boolean, string?),
+	UnregisterTemplate: (self: Renderer, id: string) -> (boolean, string?),
+	Prewarm: (self: Renderer, id: string, count: number) -> (number, string?),
+	SetLimits: (self: Renderer, options: LimitOptions) -> (boolean, string?),
+	GetUsage: (self: Renderer) -> Usage,
+	Destroy: (self: Renderer) -> (),
 }
 
 type ModelEntry = {
-	layout: Layout,
-	shots: { Shot },
-	rect: Atlas.Rect,
-	references: number,
+	Layout: Layout,
+	Shots: { Shot },
+	Rect: Atlas.Rect,
+	References: number,
+	HasTemplate: boolean?,
 }
-type Quad = { vertices: { number }, uvs: { number }, normal: number }
-type InstanceEntry = { id: string, cframe: CFrame, size: Vector3, slot: number, lastShot: number?, partRevision: number? }
+type Quad = { Vertices: { number }, UVs: { number }, Normal: number }
+type InstanceEntry = {
+	Id: string,
+	CFrame: CFrame,
+	Size: Vector3,
+	Slot: number,
+	LastShot: number?,
+	PartRevision: number?,
+	LodEnabled: boolean,
+	Real: InstanceCache.Lease?,
+	RealDirty: boolean,
+}
 
 local DEFAULT_LAYERS: { Layer } = { "color", "normal", "roughness", "metalness", "emissive" }
 local MAP_NAMES: { [string]: string } = {
-	color = "ColorMap",
-	normal = "NormalMap",
-	roughness = "RoughnessMap",
-	metalness = "MetalnessMap",
-	emissive = "EmissiveMask",
+	["color"] = "ColorMap",
+	["normal"] = "NormalMap",
+	["roughness"] = "RoughnessMap",
+	["metalness"] = "MetalnessMap",
+	["emissive"] = "EmissiveMask",
 }
 local DEFAULT_COLORS: { [string]: Color3 } = {
-	color = Color3.new(1, 1, 1),
-	normal = Color3.new(0.5, 0.5, 1),
-	roughness = Color3.new(0.6, 0.6, 0.6),
-	metalness = Color3.new(0, 0, 0),
-	emissive = Color3.new(0, 0, 0),
+	["color"] = Color3.new(1, 1, 1),
+	["normal"] = Color3.new(0.5, 0.5, 1),
+	["roughness"] = Color3.new(0.6, 0.6, 0.6),
+	["metalness"] = Color3.new(0, 0, 0),
+	["emissive"] = Color3.new(0, 0, 0),
 }
 
 local function asContent(value: ImageContent): Content
@@ -97,18 +128,18 @@ end
 
 local function getSource(sources: Sources, layer: string): Source?
 	if layer == "color" then
-		return sources.color
+		return sources.Color
 	end
 	if layer == "normal" then
-		return sources.normal
+		return sources.Normal
 	end
 	if layer == "roughness" then
-		return sources.roughness
+		return sources.Roughness
 	end
 	if layer == "metalness" then
-		return sources.metalness
+		return sources.Metalness
 	end
-	return sources.emissive
+	return sources.Emissive
 end
 
 local function makeQuad(mesh: EditableMesh): Quad
@@ -125,31 +156,32 @@ local function makeQuad(mesh: EditableMesh): Quad
 	mesh:SetFaceUVs(b, { uvs[1], uvs[4], uvs[3] })
 	mesh:SetFaceNormals(a, { normal, normal, normal })
 	mesh:SetFaceNormals(b, { normal, normal, normal })
-	return { vertices = vertices, uvs = uvs, normal = normal }
+	return { Vertices = vertices, UVs = uvs, Normal = normal }
 end
 
 local function hide(mesh: EditableMesh, quad: Quad)
-	for _, vertex in quad.vertices do
+	for _, vertex in quad.Vertices do
 		mesh:SetPosition(vertex, Vector3.zero)
 	end
 end
 
-function ImposterRender.new(options: Options?): (Renderer?, string?)
+function ImposterRender.New(options: Options?): (Renderer?, string?)
 	local o: Options = options or {}
-	local limits = Limits.resolve(o.limits)
-	local updateBudget = Scheduler.budget(o.updateBudget)
-	local layers: { Layer } = table.clone(o.layers or DEFAULT_LAYERS)
+	local limits = Limits.Resolve(o.Limits)
+	local updateBudget = Scheduler.Budget(o.UpdateBudget)
+	local lod = Lod.Resolve(o.Lod)
+	local layers: { Layer } = table.clone(o.Layers or DEFAULT_LAYERS)
 	local selected: { [string]: boolean } = {}
 	for _, layer in layers do
 		assert(MAP_NAMES[layer] ~= nil and not selected[layer], "invalid or duplicate layer")
 		selected[layer] = true
 	end
 	assert(selected["color"], "color layer is required")
-	local pixels = #layers * limits.maxTextureSize ^ 2
+	local pixels = #layers * limits.MaxTextureSize ^ 2
 	-- Leave room for one full-size source image during streaming registration.
 	local transientPixels = 1024 ^ 2
-	if #layers + 1 > limits.maxEditableImages or pixels + transientPixels > limits.maxTexturePixels then
-		return nil, "texture budget must fit atlas layers plus one transient 1024x1024 source image"
+	if #layers + 1 > limits.MaxEditableImages or pixels + transientPixels > limits.MaxTexturePixels then
+		return nil, "texture Budget must fit atlas Layers plus one transient 1024x1024 source image"
 	end
 	local images: { [string]: EditableImage } = {}
 	local mesh: EditableMesh? = nil
@@ -160,21 +192,21 @@ function ImposterRender.new(options: Options?): (Renderer?, string?)
 	local ok, message = pcall(function()
 		for _, layer in layers do
 			local image: EditableImage? =
-				AssetService:CreateEditableImage({ Size = Vector2.one * limits.maxTextureSize })
+				AssetService:CreateEditableImage({ Size = Vector2.one * limits.MaxTextureSize })
 			assert(image, `Roblox denied EditableImage allocation for {layer}`)
 			images[layer] = image
 		end
 		local createdMesh: EditableMesh? = AssetService:CreateEditableMesh()
 		assert(createdMesh, "Roblox denied EditableMesh allocation")
 		mesh = createdMesh
-		for index = 1, limits.maxInstances do
+		for index = 1, limits.MaxInstances do
 			table.insert(quads, makeQuad(createdMesh))
-			table.insert(free, limits.maxInstances - index + 1)
+			table.insert(free, limits.MaxInstances - index + 1)
 		end
 		-- Degenerate, invisible triangles keep a fixed local-space mesh bound.
 		-- All dynamic quads must stay inside this extent for reliable culling.
 		for _, sign in { -1, 1 } do
-			local point = Vector3.one * limits.worldExtent * sign
+			local point = Vector3.one * limits.WorldExtent * sign
 			createdMesh:AddTriangle(
 				createdMesh:AddVertex(point),
 				createdMesh:AddVertex(point),
@@ -191,7 +223,7 @@ function ImposterRender.new(options: Options?): (Renderer?, string?)
 		createdPart.CastShadow = false
 		createdPart.DoubleSided = true
 		createdPart.Color = Color3.new(1, 1, 1)
-		createdPart.CFrame = o.origin or CFrame.identity
+		createdPart.CFrame = o.Origin or CFrame.identity
 		-- Preserve the 1:1 mapping between editable vertex coordinates and studs.
 		createdPart.Size = createdPart.MeshSize
 		local maps: { [string]: Content } = {}
@@ -201,10 +233,10 @@ function ImposterRender.new(options: Options?): (Renderer?, string?)
 		local createdSurface = AssetService:CreateSurfaceAppearanceAsync(maps)
 		surface = createdSurface
 		createdSurface.AlphaMode = Enum.AlphaMode.Transparency
-		createdSurface.EmissiveStrength = o.emissiveStrength or 1
-		createdSurface.EmissiveTint = o.emissiveTint or Color3.new(1, 1, 1)
+		createdSurface.EmissiveStrength = o.EmissiveStrength or 1
+		createdSurface.EmissiveTint = o.EmissiveTint or Color3.new(1, 1, 1)
 		createdSurface.Parent = createdPart
-		createdPart.Parent = o.parent or workspace
+		createdPart.Parent = o.Parent or workspace
 	end)
 	if not ok then
 		if surface then
@@ -223,7 +255,7 @@ function ImposterRender.new(options: Options?): (Renderer?, string?)
 	end
 	local sharedMesh = mesh :: EditableMesh
 	local sharedPart = part :: MeshPart
-	local allocator = Atlas.new(limits.maxTextureSize)
+	local allocator = Atlas.New(limits.MaxTextureSize)
 	local models: { [string]: ModelEntry } = {}
 	local instances: { [number]: InstanceEntry } = {}
 	local modelCount = 0
@@ -234,9 +266,15 @@ function ImposterRender.new(options: Options?): (Renderer?, string?)
 	local renderer: Renderer
 	local lastPartCFrame: CFrame? = nil
 	local partRevision = 0
-	local scheduler = Scheduler.new(limits.maxInstances)
-	local lastStats: Scheduler.Stats = { checked = 0, updated = 0 }
+	local scheduler = Scheduler.New(limits.MaxInstances)
+	local lastStats: Scheduler.Stats = { Checked = 0, Updated = 0 }
 	local updateMilliseconds = 0
+	local cache: InstanceCache.Cache? = nil
+	local realEntries: { [InstanceEntry]: boolean } = {}
+	local realCount = 0
+	local transitions = 0
+	local movedParts = 0
+	local flushMilliseconds = 0.05
 
 	local function requireAlive()
 		assert(not destroyed, "renderer has been destroyed")
@@ -244,7 +282,7 @@ function ImposterRender.new(options: Options?): (Renderer?, string?)
 
 	local function validBounds(cframe: CFrame, size: Vector3)
 		local position = sharedPart.CFrame:PointToObjectSpace(cframe.Position)
-		local extent = limits.worldExtent
+		local extent = limits.WorldExtent
 		local radius = size.Magnitude / math.sqrt(2)
 		assert(size.X > 0 and size.Y > 0 and size.Z > 0 and size.Magnitude < math.huge, "invalid bounding box size")
 		assert(
@@ -252,15 +290,15 @@ function ImposterRender.new(options: Options?): (Renderer?, string?)
 				and position.Y == position.Y
 				and position.Z == position.Z
 				and math.max(math.abs(position.X), math.abs(position.Y), math.abs(position.Z)) + radius <= extent,
-			"imposter lies outside worldExtent; create a batch closer to the model or increase the extent"
+			"imposter lies outside WorldExtent; create a batch closer to the model or increase the extent"
 		)
 	end
 
 	local function clearRect(rect: Atlas.Rect)
 		for _, layer in layers do
 			images[layer]:DrawRectangle(
-				rect.position,
-				rect.size,
+				rect.Position,
+				rect.Size,
 				DEFAULT_COLORS[layer],
 				if layer == "color" then 1 else 0,
 				Enum.ImageCombineType.Overwrite
@@ -282,13 +320,109 @@ function ImposterRender.new(options: Options?): (Renderer?, string?)
 		activeSource = nil
 	end
 
+	local function draw(entry: InstanceEntry, cameraCFrame: CFrame, verticalFieldOfView: number): boolean
+		local cameraPosition = cameraCFrame.Position
+		local partCFrame = sharedPart.CFrame
+		local model = models[entry.Id]
+		local relative = cameraPosition - entry.CFrame.Position
+		local toward = if relative.Magnitude > 1e-8 then relative else -cameraCFrame.LookVector
+		local shot = Util.SelectShot(entry.CFrame:VectorToObjectSpace(toward), model.Shots)
+		-- Capture-locked geometry only changes at a shot boundary or when
+		-- its bounds/batch transform change. Avoid thousands of mesh writes.
+		if entry.LastShot == shot.Index and entry.PartRevision == partRevision then
+			return false
+		end
+		local solution =
+			Util.Solve(cameraCFrame, verticalFieldOfView, entry.CFrame, entry.Size, model.Layout, model.Shots)
+		local quad = quads[entry.Slot]
+		local half = solution.Size / 2
+		local cf = partCFrame:ToObjectSpace(solution.CFrame)
+		local corners = {
+			Vector3.new(-half.X, half.Y, 0),
+			Vector3.new(half.X, half.Y, 0),
+			Vector3.new(half.X, -half.Y, 0),
+			Vector3.new(-half.X, -half.Y, 0),
+		}
+		local atlasSize = Vector2.one * allocator.Size
+		local start = model.Rect.Position + solution.Shot.Position + Vector2.one * model.Layout.PaddingPx
+		local uvMin = start / atlasSize
+		local uvMax = (start + Vector2.one * model.Layout.MaxResolutionPx) / atlasSize
+		local uvs = { uvMin, Vector2.new(uvMax.X, uvMin.Y), uvMax, Vector2.new(uvMin.X, uvMax.Y) }
+		for i = 1, 4 do
+			sharedMesh:SetPosition(quad.Vertices[i], cf:PointToWorldSpace(corners[i]))
+			sharedMesh:SetUV(quad.UVs[i], uvs[i])
+		end
+		sharedMesh:SetNormal(quad.Normal, cf.ZVector)
+		entry.LastShot = shot.Index
+		entry.PartRevision = partRevision
+		return true
+	end
+
 	renderer = {
-		mesh = sharedMesh,
-		part = sharedPart,
-		images = images,
-		limits = limits,
-		updateBudget = updateBudget,
-		register = function(
+		Mesh = sharedMesh,
+		Part = sharedPart,
+		Images = images,
+		Limits = limits,
+		UpdateBudget = updateBudget,
+		Lod = lod,
+		RegisterTemplate = function(
+			_self: Renderer,
+			id: string,
+			template: Instance,
+			input: TemplateOptions?
+		): (boolean, string?)
+			requireAlive()
+			local model = models[id]
+			if not model then
+				return false, "Register the baked model before its Template"
+			end
+			if model.HasTemplate then
+				return false, "Template already registered"
+			end
+			if not cache then
+				local ok, err = pcall(function()
+					cache = InstanceCache.New(o.InstanceCache)
+				end)
+				if not ok then
+					return false, tostring(err)
+				end
+			end
+			local pool = cache :: InstanceCache.Cache
+			if lod.MaxRealInstances > pool.MaxInstances then
+				return false, "MaxRealInstances exceeds the Instance cache Capacity"
+			end
+			local ok, err = pool:Register(id, template, input)
+			if ok then
+				model.HasTemplate = true
+				Scheduler.Invalidate(scheduler)
+			end
+			return ok, err
+		end,
+		UnregisterTemplate = function(_self: Renderer, id: string): (boolean, string?)
+			requireAlive()
+			local pool = cache
+			local model = models[id]
+			if not model or not model.HasTemplate or not pool then
+				return false, "unknown Template"
+			end
+			local ok, err = pool:Unregister(id)
+			if ok then
+				model.HasTemplate = nil
+				Scheduler.Invalidate(scheduler)
+			end
+			return ok, err
+		end,
+		Prewarm = function(_self: Renderer, id: string, count: number): (number, string?)
+			requireAlive()
+			local pool = cache
+			if not pool then
+				return 0, "Register a Template before prewarming"
+			end
+			local warmed, err = pool:Prewarm(id, count)
+			Scheduler.Invalidate(scheduler)
+			return warmed, err
+		end,
+		Register = function(
 			_self: Renderer,
 			id: string,
 			sources: Sources,
@@ -302,14 +436,14 @@ function ImposterRender.new(options: Options?): (Renderer?, string?)
 				return false, "model id must not be empty"
 			end
 			if models[id] then
-				return false, "model id is already registered; reuse it with add or unregister it first"
+				return false, "model id is already registered; reuse it with add or Unregister it first"
 			end
-			if modelCount >= limits.maxModels then
+			if modelCount >= limits.MaxModels then
 				return false, "model cache limit reached"
 			end
-			local layout = Util.layout(layoutInput)
-			local shots = Util.shots(layout)
-			local rect = Atlas.allocate(allocator, Util.atlasSize(layout))
+			local layout = Util.Layout(layoutInput)
+			local shots = Util.Shots(layout)
+			local rect = Atlas.Allocate(allocator, Util.AtlasSize(layout))
 			if not rect then
 				return false, "shared texture atlas is full; lower bake resolution/shot count or use another batch"
 			end
@@ -321,17 +455,17 @@ function ImposterRender.new(options: Options?): (Renderer?, string?)
 					if value ~= nil then
 						if type(value) == "table" then
 							for _, shot in shots do
-								local entry = value[shot.key]
-								assert(entry, `missing {layer} image for {shot.key}`)
+								local entry = value[shot.Key]
+								assert(entry, `missing {layer} image for {shot.Key}`)
 								copySource(
 									entry,
-									Vector2.one * Util.tileSize(layout),
-									rect.position + shot.position,
+									Vector2.one * Util.TileSize(layout),
+									rect.Position + shot.Position,
 									images[layer]
 								)
 							end
 						else
-							copySource(value, rect.size, rect.position, images[layer])
+							copySource(value, rect.Size, rect.Position, images[layer])
 						end
 					end
 				end
@@ -342,14 +476,14 @@ function ImposterRender.new(options: Options?): (Renderer?, string?)
 					activeSource:Destroy()
 					activeSource = nil
 				end
-				Atlas.release(allocator, rect)
+				Atlas.Release(allocator, rect)
 				return false, tostring(err)
 			end
-			models[id] = { layout = layout, shots = shots, rect = rect, references = 0 }
+			models[id] = { Layout = layout, Shots = shots, Rect = rect, References = 0 }
 			modelCount += 1
 			return true, nil
 		end,
-		unregister = function(_self: Renderer, id: string): (boolean, string?)
+		Unregister = function(_self: Renderer, id: string): (boolean, string?)
 			requireAlive()
 			if busy then
 				return false, "registration in progress"
@@ -358,64 +492,87 @@ function ImposterRender.new(options: Options?): (Renderer?, string?)
 			if not entry then
 				return false, "unknown model id"
 			end
-			if entry.references > 0 then
-				return false, "destroy this model's active handles before unregistering"
+			if entry.References > 0 then
+				return false, "Destroy this model's Active handles before unregistering"
 			end
-			Atlas.release(allocator, entry.rect)
+			if entry.HasTemplate and cache then
+				local ok, err = cache:Unregister(id)
+				if not ok then
+					return false, err
+				end
+			end
+			Atlas.Release(allocator, entry.Rect)
 			models[id] = nil
 			modelCount -= 1
 			return true, nil
 		end,
-		add = function(_self: Renderer, id: string, cframe: CFrame, size: Vector3): (Handle?, string?)
+		Add = function(_self: Renderer, id: string, cframe: CFrame, size: Vector3): (Handle?, string?)
 			requireAlive()
 			local model = models[id]
 			if not model then
-				return nil, "register the model before adding instances"
+				return nil, "Register the model before adding Instances"
 			end
-			if instanceCount >= limits.maxInstances then
-				return nil, "instance limit reached"
+			if instanceCount >= limits.MaxInstances then
+				return nil, "Instance limit reached"
 			end
 			local slot = table.remove(free)
 			if not slot then
-				return nil, "mesh capacity reached"
+				return nil, "mesh Capacity reached"
 			end
 			local success, err = pcall(validBounds, cframe, size)
 			if not success then
 				table.insert(free, slot)
 				return nil, tostring(err)
 			end
-			local entry: InstanceEntry = { id = id, cframe = cframe, size = size, slot = slot }
+			local entry: InstanceEntry =
+				{ Id = id, CFrame = cframe, Size = size, Slot = slot, LodEnabled = true, RealDirty = false }
 			instances[slot] = entry
-			Scheduler.set(scheduler, slot, cframe.Position)
-			model.references += 1
+			Scheduler.Set(scheduler, slot, cframe.Position)
+			model.References += 1
 			instanceCount += 1
 			local released = false
 			local handle: Handle = {
-				update = function(_handle: Handle, boxCFrame: CFrame, boxSize: Vector3)
+				Update = function(_handle: Handle, boxCFrame: CFrame, boxSize: Vector3)
 					requireAlive()
 					assert(not released, "handle has been destroyed")
 					validBounds(boxCFrame, boxSize)
-					entry.cframe = boxCFrame
-					entry.size = boxSize
-					entry.lastShot = nil
-					Scheduler.set(scheduler, slot, boxCFrame.Position)
+					entry.CFrame = boxCFrame
+					entry.Size = boxSize
+					entry.LastShot = nil
+					entry.RealDirty = true
+					Scheduler.Set(scheduler, slot, boxCFrame.Position)
 				end,
-				destroy = function(_handle: Handle)
+				SetLodEnabled = function(_handle: Handle, enabled: boolean)
+					requireAlive()
+					assert(not released, "handle has been destroyed")
+					entry.LodEnabled = enabled
+					Scheduler.Invalidate(scheduler)
+				end,
+				GetRealInstance = function(_handle: Handle): Model?
+					return if not released and not destroyed and entry.Real then entry.Real.Instance else nil
+				end,
+				Destroy = function(_handle: Handle)
 					if released or destroyed then
 						return
 					end
 					released = true
+					if entry.Real and cache then
+						cache:Release(entry.Real)
+						entry.Real = nil
+						realEntries[entry] = nil
+						realCount -= 1
+					end
 					hide(sharedMesh, quads[slot])
 					instances[slot] = nil
-					Scheduler.remove(scheduler, slot)
+					Scheduler.Remove(scheduler, slot)
 					table.insert(free, slot)
-					model.references -= 1
+					model.References -= 1
 					instanceCount -= 1
 				end,
 			}
 			return handle, nil
 		end,
-		update = function(
+		Update = function(
 			_self: Renderer,
 			cameraCFrame: CFrame,
 			verticalFieldOfView: number,
@@ -423,7 +580,7 @@ function ImposterRender.new(options: Options?): (Renderer?, string?)
 		)
 			local started = os.clock()
 			requireAlive()
-			local milliseconds = updateBudget.maxMilliseconds
+			local milliseconds = updateBudget.MaxMilliseconds
 			if availableMilliseconds ~= nil then
 				assert(
 					availableMilliseconds >= 0 and availableMilliseconds < math.huge,
@@ -433,126 +590,248 @@ function ImposterRender.new(options: Options?): (Renderer?, string?)
 			end
 			assert(verticalFieldOfView > 0 and verticalFieldOfView < 180, "vertical FOV must be in (0, 180) degrees")
 			local cameraPosition = cameraCFrame.Position
-			assert(cameraPosition.Magnitude < math.huge, "camera position must be finite")
+			assert(cameraPosition.Magnitude < math.huge, "Camera Position must be finite")
 			local partCFrame = sharedPart.CFrame
 			if partCFrame ~= lastPartCFrame then
 				partRevision += 1
-				Scheduler.invalidate(scheduler)
+				Scheduler.Invalidate(scheduler)
 				lastPartCFrame = partCFrame
 			end
-			lastStats = Scheduler.run(
+			transitions, movedParts = 0, 0
+			local creates = 0
+			local retry = false
+			local promoted: { InstanceEntry } = {}
+			local pool = cache
+			local function farthest(): (InstanceEntry?, number)
+				local result: InstanceEntry? = nil
+				local distance = -1
+				for active in realEntries do
+					local nextDistance = Lod.Distance(cameraPosition, active.CFrame.Position)
+					if
+						nextDistance > distance or (nextDistance == distance and result and active.Slot > result.Slot)
+					then
+						result, distance = active, nextDistance
+					end
+				end
+				return result, distance
+			end
+			local function demote(entry: InstanceEntry)
+				local lease = entry.Real
+				assert(pool and lease)
+				-- Restore the quad immediately before releasing its real counterpart.
+				entry.LastShot = nil
+				draw(entry, cameraCFrame, verticalFieldOfView)
+				pool:Release(lease)
+				entry.Real = nil
+				realEntries[entry] = nil
+				realCount -= 1
+				transitions += 1
+			end
+			-- Reserve part of this same budget for the bounded, atomic bulk move.
+			local reserve = if pool then math.min(milliseconds * 0.25, math.max(0.05, flushMilliseconds * 1.2)) else 0
+			lastStats = Scheduler.Run(
 				scheduler,
 				cameraCFrame,
-				started + milliseconds / 1000,
+				started + (milliseconds - reserve) / 1000,
 				function(slot: number): boolean
 					local entry = instances[slot]
 					if not entry then
 						return false
 					end
-					local model = models[entry.id]
-					local relative = cameraPosition - entry.cframe.Position
-					local toward = if relative.Magnitude > 1e-8 then relative else -cameraCFrame.LookVector
-					local shot = Util.selectShot(entry.cframe:VectorToObjectSpace(toward), model.shots)
-					-- Capture-locked geometry only changes at a shot boundary or when
-					-- its bounds/batch transform change. Avoid thousands of mesh writes.
-					if entry.lastShot == shot.index and entry.partRevision == partRevision then
-						return false
+					if pool then
+						if realCount > lod.MaxRealInstances then
+							if transitions < lod.MaxTransitionsPerFrame then
+								local victim = farthest()
+								if victim then
+									demote(victim)
+								end
+							else
+								retry = true
+							end
+						end
+						local distance = Lod.Distance(cameraPosition, entry.CFrame.Position)
+						local scale = if models[entry.Id].HasTemplate then pool:ScaleFor(entry.Id, entry.Size) else nil
+						local eligible = entry.LodEnabled and scale ~= nil and lod.MaxRealInstances > 0
+						local real = entry.Real
+						if real then
+							if not eligible or distance > lod.FarDistance then
+								if transitions < lod.MaxTransitionsPerFrame then
+									demote(entry)
+									return true
+								else
+									retry = true
+									return false
+								end
+							end
+							if entry.RealDirty then
+								local queued = pool:Queue(real, entry.CFrame, entry.Size)
+								if queued then
+									entry.RealDirty = false
+								else
+									retry = true
+								end
+							end
+							return false
+						elseif eligible and distance <= lod.NearDistance then
+							local victim: InstanceEntry? = nil
+							local allowed = true
+							if realCount >= lod.MaxRealInstances then
+								local far, farDistance = farthest()
+								victim = far
+								allowed = far ~= nil and Lod.ShouldReplace(distance, farDistance, lod)
+							end
+							if allowed then
+								local needed = if victim then 2 else 1
+								local canCreate = creates < lod.MaxCreatesPerFrame
+								local warm = pool:Available(entry.Id) > 0 or (victim ~= nil and victim.Id == entry.Id)
+								if
+									transitions + needed > lod.MaxTransitionsPerFrame
+									or (not warm and not canCreate)
+									or pool:GetUsage().QueuedParts + pool:PartCount(entry.Id)
+										> pool.MaxPartsPerFlush
+								then
+									-- A cold pool with creation disabled needs an explicit
+									-- prewarm, not endless rescans of a stationary scene.
+									retry = retry or warm or lod.MaxCreatesPerFrame > 0
+								else
+									if victim then
+										demote(victim)
+									end
+									local lease, _, created = pool:Acquire(entry.Id, canCreate)
+									if lease then
+										if created then
+											creates += 1
+										end
+										local queued, queueError = pool:Queue(lease, entry.CFrame, entry.Size)
+										if not queued then
+											pool:Release(lease)
+											error(queueError)
+										end
+										entry.Real = lease
+										entry.RealDirty = false
+										realEntries[entry] = true
+										realCount += 1
+										transitions += 1
+										table.insert(promoted, entry)
+									else
+										retry = true
+									end
+								end
+							end
+						end
 					end
-					local solution = Util.solve(
-						cameraCFrame,
-						verticalFieldOfView,
-						entry.cframe,
-						entry.size,
-						model.layout,
-						model.shots
-					)
-					local quad = quads[entry.slot]
-					local half = solution.size / 2
-					local cf = partCFrame:ToObjectSpace(solution.cframe)
-					local corners = {
-						Vector3.new(-half.X, half.Y, 0),
-						Vector3.new(half.X, half.Y, 0),
-						Vector3.new(half.X, -half.Y, 0),
-						Vector3.new(-half.X, -half.Y, 0),
-					}
-					local atlasSize = Vector2.one * allocator.size
-					local start = model.rect.position + solution.shot.position + Vector2.one * model.layout.paddingPx
-					local uvMin = start / atlasSize
-					local uvMax = (start + Vector2.one * model.layout.maxResolutionPx) / atlasSize
-					local uvs = { uvMin, Vector2.new(uvMax.X, uvMin.Y), uvMax, Vector2.new(uvMin.X, uvMax.Y) }
-					for i = 1, 4 do
-						sharedMesh:SetPosition(quad.vertices[i], cf:PointToWorldSpace(corners[i]))
-						sharedMesh:SetUV(quad.uvs[i], uvs[i])
-					end
-					sharedMesh:SetNormal(quad.normal, cf.ZVector)
-					entry.lastShot = shot.index
-					entry.partRevision = partRevision
-					return true
+					return draw(entry, cameraCFrame, verticalFieldOfView)
 				end
 			)
+			if pool then
+				local flushStarted = os.clock()
+				local ok, err = pool:Flush()
+				if not ok then
+					for _, entry in promoted do
+						if entry.Real then
+							demote(entry)
+						end
+					end
+					Scheduler.Invalidate(scheduler)
+					error(err)
+				end
+				movedParts = pool:GetUsage().MovedParts
+				for _, entry in promoted do
+					if entry.Real then
+						hide(sharedMesh, quads[entry.Slot])
+						entry.LastShot = nil
+					end
+				end
+				if movedParts > 0 then
+					flushMilliseconds = (os.clock() - flushStarted) * 1000
+				end
+			end
+			if retry then
+				Scheduler.Invalidate(scheduler)
+			end
 			updateMilliseconds = (os.clock() - started) * 1000
 		end,
-		setUpdateBudget = function(self: Renderer, input: UpdateBudgetInput)
+		SetUpdateBudget = function(self: Renderer, input: UpdateBudgetInput)
 			requireAlive()
-			updateBudget = Scheduler.budget(input)
-			self.updateBudget = updateBudget
+			updateBudget = Scheduler.Budget(input)
+			self.UpdateBudget = updateBudget
 		end,
-		setLimits = function(self: Renderer, input: LimitOptions): (boolean, string?)
+		SetLodOptions = function(self: Renderer, input: LodOptions)
+			requireAlive()
+			local nextLod = Lod.Resolve(input)
+			assert(
+				not cache or nextLod.MaxRealInstances <= cache.MaxInstances,
+				"MaxRealInstances exceeds cache Capacity"
+			)
+			lod = nextLod
+			self.Lod = nextLod
+			Scheduler.Invalidate(scheduler)
+		end,
+		SetLimits = function(self: Renderer, input: LimitOptions): (boolean, string?)
 			requireAlive()
 			if busy then
 				return false, "registration in progress"
 			end
 			-- Capacity cannot grow in place without replacing the shared objects.
 			local merged: LimitOptions = {
-				maxTextureSize = input.maxTextureSize or limits.maxTextureSize,
-				maxTexturePixels = input.maxTexturePixels or limits.maxTexturePixels,
-				maxEditableImages = input.maxEditableImages or limits.maxEditableImages,
-				maxEditableMeshes = input.maxEditableMeshes or limits.maxEditableMeshes,
-				maxInstances = input.maxInstances or limits.maxInstances,
-				maxModels = input.maxModels or limits.maxModels,
-				worldExtent = input.worldExtent or limits.worldExtent,
+				MaxTextureSize = input.MaxTextureSize or limits.MaxTextureSize,
+				MaxTexturePixels = input.MaxTexturePixels or limits.MaxTexturePixels,
+				MaxEditableImages = input.MaxEditableImages or limits.MaxEditableImages,
+				MaxEditableMeshes = input.MaxEditableMeshes or limits.MaxEditableMeshes,
+				MaxInstances = input.MaxInstances or limits.MaxInstances,
+				MaxModels = input.MaxModels or limits.MaxModels,
+				WorldExtent = input.WorldExtent or limits.WorldExtent,
 			}
-			local nextLimits = Limits.resolve(merged)
+			local nextLimits = Limits.Resolve(merged)
 			if
-				nextLimits.maxTextureSize ~= allocator.size
-				or nextLimits.worldExtent ~= limits.worldExtent
-				or nextLimits.maxInstances > #quads
+				nextLimits.MaxTextureSize ~= allocator.Size
+				or nextLimits.WorldExtent ~= limits.WorldExtent
+				or nextLimits.MaxInstances > #quads
 			then
-				return false, "texture dimensions, mesh capacity, and worldExtent require a new renderer"
+				return false, "texture dimensions, mesh Capacity, and WorldExtent require a new renderer"
 			end
 			if
-				nextLimits.maxInstances < instanceCount
-				or nextLimits.maxModels < modelCount
-				or nextLimits.maxEditableImages < #layers + 1
-				or nextLimits.maxTexturePixels < pixels + transientPixels
+				nextLimits.MaxInstances < instanceCount
+				or nextLimits.MaxModels < modelCount
+				or nextLimits.MaxEditableImages < #layers + 1
+				or nextLimits.MaxTexturePixels < pixels + transientPixels
 			then
-				return false, "new limits are below current usage including the transient source reserve"
+				return false, "new Limits are below current usage including the transient source reserve"
 			end
 			limits = nextLimits
-			self.limits = nextLimits
+			self.Limits = nextLimits
 			return true, nil
 		end,
-		getUsage = function(_self: Renderer): Usage
+		GetUsage = function(_self: Renderer): Usage
 			return {
-				pendingInstances = if destroyed then 0 else Scheduler.pending(scheduler),
-				checkedInstances = lastStats.checked,
-				updatedInstances = lastStats.updated,
-				updateMilliseconds = updateMilliseconds,
-				models = modelCount,
-				instances = instanceCount,
-				editableMeshes = if destroyed then 0 else 1,
-				editableImages = if destroyed then 0 else #layers + (if activeSource then 1 else 0),
-				texturePixels = if destroyed
+				RealInstances = realCount,
+				CachedInstances = if cache then cache:GetUsage().Cached else 0,
+				BulkMovedParts = movedParts,
+				LodTransitions = transitions,
+				PendingInstances = if destroyed then 0 else Scheduler.Pending(scheduler),
+				CheckedInstances = lastStats.Checked,
+				UpdatedInstances = lastStats.Updated,
+				UpdateMilliseconds = updateMilliseconds,
+				Models = modelCount,
+				Instances = instanceCount,
+				EditableMeshes = if destroyed then 0 else 1,
+				EditableImages = if destroyed then 0 else #layers + (if activeSource then 1 else 0),
+				TexturePixels = if destroyed
 					then 0
 					else pixels + (if activeSource then activeSource.Size.X * activeSource.Size.Y else 0),
-				reservedTransientPixels = if destroyed then 0 else transientPixels,
+				ReservedTransientPixels = if destroyed then 0 else transientPixels,
 			}
 		end,
-		destroy = function(_self: Renderer)
+		Destroy = function(_self: Renderer)
 			if destroyed then
 				return
 			end
 			destroyed = true
+			if cache then
+				cache:Destroy()
+			end
+			table.clear(realEntries)
+			realCount = 0
 			sharedPart:Destroy()
 			sharedMesh:Destroy()
 			for _, image in images do
@@ -561,7 +840,7 @@ function ImposterRender.new(options: Options?): (Renderer?, string?)
 			-- An in-flight registration owns its transient source until it resumes.
 			table.clear(models)
 			table.clear(instances)
-			Scheduler.clear(scheduler)
+			Scheduler.Clear(scheduler)
 			modelCount = 0
 			instanceCount = 0
 		end,

@@ -58,7 +58,7 @@ model:SetAttribute("TiltConstraints", NumberRange.new(0, 0))
 model:SetAttribute("TiltOffset", 90)
 ```
 
-The default tilt range also works with one tilt because its midpoint is zero. `+90` views from the model's local +Y; `-90` views from below. The runtime uses the exact capture orientation, so this one-shot image stays horizontal and does not spin with the camera. The generated JSON and Luau layouts carry `tiltOffset`; `Util.layoutFromAttributes(model)` reads the same attributes when using the original bake dimensions.
+The default tilt range also works with one tilt because its midpoint is zero. `+90` views from the model's local +Y; `-90` views from below. The runtime uses the exact capture orientation, so this one-shot image stays horizontal and does not spin with the camera. The generated Luau layout carries `TiltOffset` (the JSON manifest uses `tiltOffset`); `Util.LayoutFromAttributes(model)` reads the same attributes when using the original bake dimensions.
 
 Shots use zero-based keys `shot_0000`, `shot_0001`, etc. Pan varies fastest: `index = tiltIndex * PanShotCount + panIndex`. Atlas columns are `ceil(sqrt(shotCount))`, rows are `ceil(shotCount / columns)`, and frames fill rows from the top left.
 
@@ -139,3 +139,5 @@ CI also checks the minimum supported Rust version, release tooling, and workflow
 `test/luau/Renderer.spec.luau` is the Studio integration test for the real EditableMesh/EditableImage lifecycle. It creates an unparented test container and destroys it. With the test project synced and editable assets enabled, invoke `require(game.ReplicatedStorage.ImposterTests["Renderer.spec"])()` from Studio's command bar. It does not replace or hide the original models.
 
 Roblox API constraints and conventions: [EditableImage](https://create.roblox.com/docs/reference/engine/classes/EditableImage), [EditableMesh](https://create.roblox.com/docs/reference/engine/classes/EditableMesh), [AssetService](https://create.roblox.com/docs/reference/engine/classes/AssetService), [SurfaceAppearance/PBR](https://create.roblox.com/docs/art/modeling/surface-appearance). RBXM parsing uses [rbx-dom](https://github.com/rojo-rbx/rbx-dom); mesh decoding uses [rbx_mesh](https://github.com/krakow10/rbx_mesh).
+
+The runtime can also swap nearby instances to pooled real models with bounded nearest-first scheduling and bulk part movement. See [real-model caching](imposter-render/README.md#nearby-real-models-and-instance-caching) for registration, prewarming, collision overrides, and limits.

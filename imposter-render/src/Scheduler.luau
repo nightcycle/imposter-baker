@@ -3,94 +3,94 @@
 -- Completing each pass before reprioritizing prevents distant-item starvation.
 local Scheduler = {}
 
-export type BudgetInput = { targetFps: number?, maxMilliseconds: number? }
-export type Budget = { targetFps: number, maxMilliseconds: number }
-export type Stats = { checked: number, updated: number }
-type Item = { id: number, position: Vector3 }
-type Node = { item: Item, distance: number }
+export type BudgetInput = { TargetFps: number?, MaxMilliseconds: number? }
+export type Budget = { TargetFps: number, MaxMilliseconds: number }
+export type Stats = { Checked: number, Updated: number }
+type Item = { Id: number, Position: Vector3 }
+type Node = { Item: Item, Distance: number }
 export type State = {
-	capacity: number,
-	items: { [number]: Item },
-	count: number,
-	revision: number,
-	completedRevision: number,
-	passRevision: number,
-	completedCamera: CFrame?,
-	camera: CFrame,
-	heap: { Node },
-	cursor: number,
-	collected: number,
-	phase: "idle" | "collect" | "drain",
-	clock: () -> number,
+	Capacity: number,
+	Items: { [number]: Item },
+	Count: number,
+	Revision: number,
+	CompletedRevision: number,
+	PassRevision: number,
+	CompletedCamera: CFrame?,
+	Camera: CFrame,
+	Heap: { Node },
+	Cursor: number,
+	Collected: number,
+	Phase: "idle" | "collect" | "drain",
+	Clock: () -> number,
 }
 
-function Scheduler.budget(input: BudgetInput?): Budget
+function Scheduler.Budget(input: BudgetInput?): Budget
 	local options: BudgetInput = input or {}
-	local fps = options.targetFps or 240
-	assert(fps > 0 and fps < math.huge, "targetFps must be positive and finite")
-	local milliseconds = if options.maxMilliseconds == nil then 1000 / fps * 0.25 else options.maxMilliseconds
+	local fps = options.TargetFps or 240
+	assert(fps > 0 and fps < math.huge, "TargetFps must be positive and finite")
+	local milliseconds = if options.MaxMilliseconds == nil then 1000 / fps * 0.25 else options.MaxMilliseconds
 	assert(
 		milliseconds >= 0 and milliseconds < math.huge and milliseconds <= 1000 / fps,
-		"maxMilliseconds must be finite and fit within the target frame interval"
+		"MaxMilliseconds must be finite and fit within the target frame interval"
 	)
-	return table.freeze({ targetFps = fps, maxMilliseconds = milliseconds })
+	return table.freeze({ TargetFps = fps, MaxMilliseconds = milliseconds })
 end
 
-function Scheduler.new(capacity: number, clock: (() -> number)?): State
+function Scheduler.New(capacity: number, clock: (() -> number)?): State
 	return {
-		capacity = capacity,
-		items = {},
-		count = 0,
-		revision = 0,
-		completedRevision = -1,
-		passRevision = 0,
-		completedCamera = nil,
-		camera = CFrame.identity,
-		heap = {},
-		cursor = 1,
-		collected = 0,
-		phase = "idle",
-		clock = clock or os.clock,
+		Capacity = capacity,
+		Items = {},
+		Count = 0,
+		Revision = 0,
+		CompletedRevision = -1,
+		PassRevision = 0,
+		CompletedCamera = nil,
+		Camera = CFrame.identity,
+		Heap = {},
+		Cursor = 1,
+		Collected = 0,
+		Phase = "idle",
+		Clock = clock or os.clock,
 	}
 end
 
-function Scheduler.set(state: State, id: number, position: Vector3)
-	assert(id >= 1 and id <= state.capacity and id % 1 == 0, "scheduler slot out of range")
-	local item = state.items[id]
+function Scheduler.Set(state: State, id: number, position: Vector3)
+	assert(id >= 1 and id <= state.Capacity and id % 1 == 0, "scheduler slot out of range")
+	local item = state.Items[id]
 	if item then
 		-- Preserve identity while moving so a continuously animated handle can
 		-- still be visited in this pass, using its latest bounds. Reprioritize
 		-- next pass; only removal/reuse invalidates the queued identity.
-		item.position = position
+		item.Position = position
 	else
-		state.count += 1
-		state.items[id] = { id = id, position = position }
+		state.Count += 1
+		state.Items[id] = { Id = id, Position = position }
 	end
-	state.revision += 1
+	state.Revision += 1
 end
 
-function Scheduler.remove(state: State, id: number)
-	if state.items[id] then
-		state.items[id] = nil
-		state.count -= 1
-		state.revision += 1
+function Scheduler.Remove(state: State, id: number)
+	if state.Items[id] then
+		state.Items[id] = nil
+		state.Count -= 1
+		state.Revision += 1
 	end
 end
 
-function Scheduler.invalidate(state: State)
-	state.revision += 1
+function Scheduler.Invalidate(state: State)
+	state.Revision += 1
 end
 
-function Scheduler.clear(state: State)
-	table.clear(state.items)
-	table.clear(state.heap)
-	state.count = 0
-	state.phase = "idle"
-	state.revision += 1
+function Scheduler.Clear(state: State)
+	table.clear(state.Items)
+	table.clear(state.Heap)
+	state.Count = 0
+	state.Phase = "idle"
+	state.Revision += 1
 end
 
 local function before(a: Node, b: Node): boolean
-	return a.distance < b.distance or (a.distance == b.distance and a.item.id < b.item.id)
+	return a.Distance < b.Distance or (a.Distance == b.Distance and a.Item.Id < b.Item.Id)
 end
 
 local function push(heap: { Node }, node: Node)
@@ -128,50 +128,50 @@ local function pop(heap: { Node }): Node
 	return result
 end
 
-function Scheduler.pending(state: State): number
-	if state.phase == "idle" then
-		return if state.completedRevision == state.revision then 0 else state.count
+function Scheduler.Pending(state: State): number
+	if state.Phase == "idle" then
+		return if state.CompletedRevision == state.Revision then 0 else state.Count
 	end
-	return #state.heap + (if state.phase == "collect" then math.max(0, state.count - state.collected) else 0)
+	return #state.Heap + (if state.Phase == "collect" then math.max(0, state.Count - state.Collected) else 0)
 end
 
-function Scheduler.run(state: State, camera: CFrame, deadline: number, visit: (number) -> boolean): Stats
-	local stats: Stats = { checked = 0, updated = 0 }
-	while state.clock() < deadline do
-		if state.phase == "idle" then
-			if state.count == 0 or (state.completedCamera == camera and state.completedRevision == state.revision) then
+function Scheduler.Run(state: State, camera: CFrame, deadline: number, visit: (number) -> boolean): Stats
+	local stats: Stats = { Checked = 0, Updated = 0 }
+	while state.Clock() < deadline do
+		if state.Phase == "idle" then
+			if state.Count == 0 or (state.CompletedCamera == camera and state.CompletedRevision == state.Revision) then
 				break
 			end
-			state.camera = camera
-			state.passRevision = state.revision
-			state.cursor = 1
-			state.collected = 0
-			state.phase = "collect"
-		elseif state.phase == "collect" then
-			if state.cursor > state.capacity then
-				state.phase = "drain"
+			state.Camera = camera
+			state.PassRevision = state.Revision
+			state.Cursor = 1
+			state.Collected = 0
+			state.Phase = "collect"
+		elseif state.Phase == "collect" then
+			if state.Cursor > state.Capacity then
+				state.Phase = "drain"
 			else
-				local item = state.items[state.cursor]
+				local item = state.Items[state.Cursor]
 				if item then
-					local delta = item.position - state.camera.Position
-					push(state.heap, { item = item, distance = delta:Dot(delta) })
-					state.collected += 1
+					local delta = item.Position - state.Camera.Position
+					push(state.Heap, { Item = item, Distance = delta:Dot(delta) })
+					state.Collected += 1
 				end
-				state.cursor += 1
+				state.Cursor += 1
 			end
 		else
-			if #state.heap == 0 then
-				state.completedRevision = state.passRevision
-				state.completedCamera = state.camera
-				state.phase = "idle"
+			if #state.Heap == 0 then
+				state.CompletedRevision = state.PassRevision
+				state.CompletedCamera = state.Camera
+				state.Phase = "idle"
 				-- One completed pass per call, even if the camera moved mid-pass.
 				break
 			end
-			local node = pop(state.heap)
-			if state.items[node.item.id] == node.item then
-				stats.checked += 1
-				if visit(node.item.id) then
-					stats.updated += 1
+			local node = pop(state.Heap)
+			if state.Items[node.Item.Id] == node.Item then
+				stats.Checked += 1
+				if visit(node.Item.Id) then
+					stats.Updated += 1
 				end
 			end
 		end

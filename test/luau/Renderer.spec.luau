@@ -10,86 +10,86 @@ return function()
 	source:DrawRectangle(Vector2.zero, source.Size, Color3.new(0, 1, 0), 0, Enum.ImageCombineType.Overwrite)
 	local enabledLayers: { Package.Layer } = { "color" }
 	local options: Package.Options = {
-		parent = container,
-		layers = enabledLayers,
-		updateBudget = { targetFps = 60, maxMilliseconds = 16 },
-		limits = { maxTextureSize = 128, maxInstances = 2 },
+		Parent = container,
+		Layers = enabledLayers,
+		UpdateBudget = { TargetFps = 60, MaxMilliseconds = 16 },
+		Limits = { MaxTextureSize = 128, MaxInstances = 2 },
 	}
-	local renderer, createError = Package.new(options)
+	local renderer, createError = Package.New(options)
 	assert(renderer, createError)
-	local ok, message = renderer:register(
+	local ok, message = renderer:Register(
 		"cube",
-		{ color = Content.fromObject(source) },
-		{ panShotCount = 2, maxResolutionPx = 16 }
+		{ Color = Content.fromObject(source) },
+		{ PanShotCount = 2, MaxResolutionPx = 16 }
 	)
 	assert(ok, message)
-	assert(not renderer:register("cube", { color = Content.fromObject(source) }))
-	local a, err = renderer:add("cube", CFrame.new(-3, 0, 0), Vector3.one)
+	assert(not renderer:Register("cube", { Color = Content.fromObject(source) }))
+	local a, err = renderer:Add("cube", CFrame.new(-3, 0, 0), Vector3.one)
 	assert(a, err)
-	local b, err2 = renderer:add("cube", CFrame.new(3, 0, 0), Vector3.one)
+	local b, err2 = renderer:Add("cube", CFrame.new(3, 0, 0), Vector3.one)
 	assert(b, err2)
-	assert(renderer:add("cube", CFrame.identity, Vector3.one) == nil)
-	assert(renderer:getUsage().editableMeshes == 1)
-	assert(renderer:getUsage().editableImages == 1)
-	assert(renderer:getUsage().instances == 2)
-	renderer:update(CFrame.new(0, 0, 20), 70, 0)
-	assert(renderer:getUsage().updatedInstances == 0 and renderer:getUsage().pendingInstances == 2)
-	renderer:update(CFrame.new(0, 0, 20), 70)
-	assert(renderer:getUsage().updatedInstances == 2 and renderer:getUsage().pendingInstances == 0)
+	assert(renderer:Add("cube", CFrame.identity, Vector3.one) == nil)
+	assert(renderer:GetUsage().EditableMeshes == 1)
+	assert(renderer:GetUsage().EditableImages == 1)
+	assert(renderer:GetUsage().Instances == 2)
+	renderer:Update(CFrame.new(0, 0, 20), 70, 0)
+	assert(renderer:GetUsage().UpdatedInstances == 0 and renderer:GetUsage().PendingInstances == 2)
+	renderer:Update(CFrame.new(0, 0, 20), 70)
+	assert(renderer:GetUsage().UpdatedInstances == 2 and renderer:GetUsage().PendingInstances == 0)
 	local function positionSum(): Vector3
 		local sum = Vector3.zero
-		for _, vertex in renderer.mesh:GetVertices() do
-			sum += renderer.mesh:GetPosition(vertex)
+		for _, vertex in renderer.Mesh:GetVertices() do
+			sum += renderer.Mesh:GetPosition(vertex)
 		end
 		return sum
 	end
 	local initial = positionSum()
-	renderer:update(CFrame.new(0, 0, 21), 70)
+	renderer:Update(CFrame.new(0, 0, 21), 70)
 	assert((positionSum() - initial).Magnitude < 1e-5, "same capture must keep geometry fixed")
-	a:update(CFrame.new(-4, 0, 0), Vector3.one * 2)
-	renderer:update(CFrame.new(0, 0, 21), 70)
+	a:Update(CFrame.new(-4, 0, 0), Vector3.one * 2)
+	renderer:Update(CFrame.new(0, 0, 21), 70)
 	assert(
 		(positionSum() - initial - Vector3.new(-4, 0, 0)).Magnitude < 1e-4,
-		"bounds changes must invalidate cached geometry"
+		"Bounds changes must Invalidate Cached geometry"
 	)
 	local moved = positionSum()
-	renderer:setUpdateBudget({ targetFps = 240, maxMilliseconds = 0 })
-	renderer.part.CFrame = CFrame.new(1, 0, 0)
-	renderer:update(CFrame.new(0, 0, 21), 70)
-	assert(positionSum() == moved, "zero budget must defer writes")
-	renderer:setUpdateBudget({ targetFps = 60, maxMilliseconds = 16 })
-	renderer:update(CFrame.new(0, 0, 21), 70)
+	renderer:SetUpdateBudget({ TargetFps = 240, MaxMilliseconds = 0 })
+	renderer.Part.CFrame = CFrame.new(1, 0, 0)
+	renderer:Update(CFrame.new(0, 0, 21), 70)
+	assert(positionSum() == moved, "zero Budget must defer writes")
+	renderer:SetUpdateBudget({ TargetFps = 60, MaxMilliseconds = 16 })
+	renderer:Update(CFrame.new(0, 0, 21), 70)
 	assert(
 		(positionSum() - moved + Vector3.new(8, 0, 0)).Magnitude < 1e-4,
-		"batch movement must preserve world-space bounds"
+		"batch movement must preserve world-space Bounds"
 	)
-	renderer:update(CFrame.new(0, 4, -20), 55)
-	assert(not renderer:unregister("cube"))
-	a:destroy()
-	a:destroy()
-	b:destroy()
-	assert(renderer:unregister("cube"))
-	assert(renderer:getUsage().models == 0)
-	local wrongSize = renderer:register("wrong", { color = Content.fromObject(source) })
-	assert(not wrongSize and renderer:getUsage().models == 0)
-	local okAgain, againError = renderer:register(
+	renderer:Update(CFrame.new(0, 4, -20), 55)
+	assert(not renderer:Unregister("cube"))
+	a:Destroy()
+	a:Destroy()
+	b:Destroy()
+	assert(renderer:Unregister("cube"))
+	assert(renderer:GetUsage().Models == 0)
+	local wrongSize = renderer:Register("wrong", { Color = Content.fromObject(source) })
+	assert(not wrongSize and renderer:GetUsage().Models == 0)
+	local okAgain, againError = renderer:Register(
 		"again",
-		{ color = Content.fromObject(source) },
-		{ panShotCount = 2, maxResolutionPx = 16 }
+		{ Color = Content.fromObject(source) },
+		{ PanShotCount = 2, MaxResolutionPx = 16 }
 	)
 	assert(okAgain, againError)
-	assert(renderer:setLimits({ maxInstances = 1 }))
-	assert(not renderer:setLimits({ maxTextureSize = 256 }))
-	renderer:destroy()
-	renderer:destroy()
-	assert(renderer:getUsage().editableImages == 0 and renderer:getUsage().editableMeshes == 0)
+	assert(renderer:SetLimits({ MaxInstances = 1 }))
+	assert(not renderer:SetLimits({ MaxTextureSize = 256 }))
+	renderer:Destroy()
+	renderer:Destroy()
+	assert(renderer:GetUsage().EditableImages == 0 and renderer:GetUsage().EditableMeshes == 0)
 
 	local pbrOptions: Package.Options = {
-		parent = container,
-		limits = { maxTextureSize = 128, maxInstances = 2 },
-		updateBudget = { targetFps = 60, maxMilliseconds = 16 },
+		Parent = container,
+		Limits = { MaxTextureSize = 128, MaxInstances = 2 },
+		UpdateBudget = { TargetFps = 60, MaxMilliseconds = 16 },
 	}
-	local pbr, pbrError = Package.new(pbrOptions)
+	local pbr, pbrError = Package.New(pbrOptions)
 	assert(pbr, pbrError)
 	local tile: EditableImage? = assetService:CreateEditableImage({ Size = Vector2.new(20, 20) })
 	assert(tile)
@@ -98,38 +98,38 @@ return function()
 	local tileContent = Content.fromObject(tile)
 	local tileMap: { [string]: Package.ImageContent } = { shot_0000 = tileContent, shot_0001 = tileContent }
 	local sources: Package.Sources = {
-		color = tileMap,
-		normal = content,
-		roughness = content,
-		metalness = content,
-		emissive = content,
+		Color = tileMap,
+		Normal = content,
+		Roughness = content,
+		Metalness = content,
+		Emissive = content,
 	}
-	local loaded, loadError = pbr:register("pbr", sources, { panShotCount = 2, maxResolutionPx = 16 })
+	local loaded, loadError = pbr:Register("pbr", sources, { PanShotCount = 2, MaxResolutionPx = 16 })
 	assert(loaded, loadError)
-	assert(pbr:getUsage().editableImages == 5 and #pbr.mesh:GetVertices() == 14)
-	local near, nearError = pbr:add("pbr", CFrame.new(0, 0, -3), Vector3.one)
-	local far, farError = pbr:add("pbr", CFrame.new(0, 0, 3), Vector3.one)
+	assert(pbr:GetUsage().EditableImages == 5 and #pbr.Mesh:GetVertices() == 14)
+	local near, nearError = pbr:Add("pbr", CFrame.new(0, 0, -3), Vector3.one)
+	local far, farError = pbr:Add("pbr", CFrame.new(0, 0, 3), Vector3.one)
 	assert(near, nearError)
 	assert(far, farError)
-	pbr:update(CFrame.identity, 70)
+	pbr:Update(CFrame.identity, 70)
 	-- Attribute IDs are stable but their enumeration order is not a contract.
 	local hasFirst = false
 	local hasSecond = false
-	for _, uvId in pbr.mesh:GetUVs() do
-		local uv = pbr.mesh:GetUV(uvId)
+	for _, uvId in pbr.Mesh:GetUVs() do
+		local uv = pbr.Mesh:GetUV(uvId)
 		if uv then
 			hasFirst = hasFirst or uv.X == 2 / 128
 			hasSecond = hasSecond or uv.X == 22 / 128
 		end
 	end
-	assert(hasFirst and hasSecond, "instances must select independent shot UVs")
-	local pixels = pbr.images.color:ReadPixelsBuffer(Vector2.new(2, 2), Vector2.one)
+	assert(hasFirst and hasSecond, "Instances must select independent shot UVs")
+	local pixels = pbr.Images["color"]:ReadPixelsBuffer(Vector2.new(2, 2), Vector2.one)
 	assert(buffer.readu8(pixels, 0) == 255 and buffer.readu8(pixels, 1) == 0)
-	near:destroy()
-	far:destroy()
-	pbr:destroy()
+	near:Destroy()
+	far:Destroy()
+	pbr:Destroy()
 	tile:Destroy()
 	source:Destroy()
 	container:Destroy()
-	print("Renderer shared resources, allocation limits, cleanup, and rollback passed")
+	print("Renderer shared resources, allocation Limits, cleanup, and rollback passed")
 end

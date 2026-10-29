@@ -7,33 +7,33 @@ local Package = require(ReplicatedStorage.ImposterRender)
 local Assets = {}
 Assets.Names = table.freeze({ "grass", "pillar", "lilypad", "tree" })
 
-export type Entry = { name: string, template: Model, size: Vector3, folder: Folder }
-export type Loaded = { sources: Package.Sources, images: { EditableImage } }
+export type Entry = { Name: string, Template: Model, Size: Vector3, Folder: Folder }
+export type Loaded = { Sources: Package.Sources, Images: { EditableImage } }
 
-function Assets.root(): Folder
+function Assets.Root(): Folder
 	local root = ReplicatedStorage:WaitForChild("DemoAssets")
 	assert(root:IsA("Folder"), "DemoAssets is missing; build the complete demo.rbxl")
 	return root
 end
 
-function Assets.layout(entry: Entry): Package.Layout
-	return Package.Util.layoutFromAttributes(entry.folder)
+function Assets.Layout(entry: Entry): Package.Layout
+	return Package.Util.LayoutFromAttributes(entry.Folder)
 end
 
-function Assets.entry(name: string): Entry
-	local folder = Assets.root():FindFirstChild(name)
+function Assets.Entry(name: string): Entry
+	local folder = Assets.Root():FindFirstChild(name)
 	assert(folder and folder:IsA("Folder"), `missing demo model {name}`)
 	local size = folder:GetAttribute("BoundsSize")
 	local template = folder:FindFirstChild("Original")
 	assert(typeof(size) == "Vector3" and template and template:IsA("Model"), "invalid demo model metadata")
-	return { name = name, template = template, size = size, folder = folder }
+	return { Name = name, Template = template, Size = size, Folder = folder }
 end
 
-function Assets.loadImage(folder: Folder): EditableImage
+function Assets.LoadImage(folder: Folder): EditableImage
 	local width = folder:GetAttribute("Width")
 	local height = folder:GetAttribute("Height")
 	assert(typeof(width) == "number" and typeof(height) == "number", "invalid embedded texture size")
-	assert(width > 0 and height > 0 and width <= 1024 and height <= 1024, "embedded image exceeds engine limits")
+	assert(width > 0 and height > 0 and width <= 1024 and height <= 1024, "embedded image exceeds engine Limits")
 	local children = folder:GetChildren()
 	table.sort(children, function(a: Instance, b: Instance): boolean
 		return a.Name < b.Name
@@ -62,14 +62,14 @@ function Assets.loadImage(folder: Folder): EditableImage
 	return image
 end
 
-function Assets.load(entry: Entry): Loaded
+function Assets.Load(entry: Entry): Loaded
 	local images: { EditableImage } = {}
 	local maps: { [string]: Content } = {}
 	local success, message = pcall(function()
 		for _, name in { "color", "normal", "roughness", "metalness", "emissive" } do
-			local folder = entry.folder:FindFirstChild(name)
+			local folder = entry.Folder:FindFirstChild(name)
 			assert(folder and folder:IsA("Folder"), `missing {name} texture`)
-			local image = Assets.loadImage(folder)
+			local image = Assets.LoadImage(folder)
 			table.insert(images, image)
 			maps[name] = Content.fromObject(image)
 		end
@@ -81,14 +81,14 @@ function Assets.load(entry: Entry): Loaded
 		error(tostring(message))
 	end
 	return {
-		sources = {
-			color = maps.color,
-			normal = maps.normal,
-			roughness = maps.roughness,
-			metalness = maps.metalness,
-			emissive = maps.emissive,
+		Sources = {
+			Color = maps["color"],
+			Normal = maps["normal"],
+			Roughness = maps["roughness"],
+			Metalness = maps["metalness"],
+			Emissive = maps["emissive"],
 		},
-		images = images,
+		Images = images,
 	}
 end
 

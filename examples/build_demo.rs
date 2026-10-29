@@ -232,7 +232,7 @@ fn stage(dom: &mut WeakDom) -> Result<Ref> {
         part(
             "Baseplate",
             Vec3::new(0.0, -0.5, 256.0),
-            Vec3::new(768.0, 1.0, 768.0),
+            Vec3::new(1536.0, 1.0, 1536.0),
             Color3::new(0.133, 0.161, 0.2),
         ),
     );
@@ -348,7 +348,7 @@ fn build(base: &Path, output: &Path) -> Result<()> {
             serde_json::from_slice(&fs::read(format!("test/demo/{name}.imposter.json"))?)?;
         manifest.settings.validate()?;
         let bounds = Vec3::from_array(manifest.bounds_size);
-        let scale = 10.0 / bounds.length();
+        let scale = 10.0 / bounds.length() / if name == "grass" { 3.0 } else { 1.0 };
         let folder = place.insert(
             assets,
             InstanceBuilder::new("Folder")
@@ -399,7 +399,10 @@ fn build(base: &Path, output: &Path) -> Result<()> {
                 i.properties
                     .insert("Size".into(), vector(size * scale).into());
                 i.properties.insert("Anchored".into(), true.into());
-                i.properties.insert("CanCollide".into(), false.into());
+                i.properties.insert(
+                    "CanCollide".into(),
+                    (name == "tree" || name == "pillar").into(),
+                );
             }
         }
         original.transfer(root, &mut place, template);
@@ -412,7 +415,7 @@ fn build(base: &Path, output: &Path) -> Result<()> {
     }
     // The place remains readable in edit mode before its runtime scripts run.
     place.insert(storage,InstanceBuilder::new("ModuleScript").with_name("READ_ME")
-        .with_property("Source","--!strict\n-- IMPOSTER BAKER STRESS TEST\n-- Press Play (F5), not Run. Walk and look around with normal Roblox controls.\n-- 4,100 imposters share one mesh and five texture maps on a 768-stud baseplate.\n-- Change Rows/Columns/Spacing in ReplicatedStorage.Demo.Scene to scale the test.\n-- Lilypads use root attributes PanShotCount=1, TiltShotCount=1, TiltOffset=90.\n-- Texture pixels are embedded: no uploads, HTTP service, Wally install, or plugins are needed.\n-- Published experiences require Mesh / Image APIs enabled in their settings.\n-- Package source: ReplicatedStorage.ImposterRender\nreturn nil\n"));
+        .with_property("Source","--!strict\n-- IMPOSTER BAKER STRESS TEST\n-- Press Play (F5), not Run. Walk and look around with normal Roblox controls.\n-- 4,100 instances: distant imposters share one mesh and five texture maps.\n-- Up to 64 nearby real models reuse an instance cache and BulkMoveTo.\n-- Comparison-row imposters remain fixed; field LOD distances are in Demo.Scene.\n-- Seeded scatter on a 1536x1536 baseplate; grass is one-third its previous size.\n-- Change FieldCount/ScatterSeed/MinimumSpacing in ReplicatedStorage.Demo.Scene.\n-- Lilypads use root attributes PanShotCount=1, TiltShotCount=1, TiltOffset=90.\n-- Texture pixels are embedded: no uploads, HTTP service, Wally install, or plugins are needed.\n-- Published experiences require Mesh / Image APIs enabled in their settings.\n-- Package source: ReplicatedStorage.ImposterRender\nreturn nil\n"));
     if let Some(parent) = output.parent() {
         fs::create_dir_all(parent)?;
     }

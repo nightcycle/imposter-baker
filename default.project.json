@@ -4,7 +4,8 @@
     "$className": "DataModel",
     "ReplicatedStorage": {
       "ImposterRender": { "$path": "imposter-render/src" },
-      "ImposterTests": { "$path": "test/luau" }
+      "ImposterTests": { "$path": "test/luau" },
+      "Demo": { "$className": "Folder", "Scene": { "$path": "demo/src/shared/Scene.luau" } }
     }
   }
 }

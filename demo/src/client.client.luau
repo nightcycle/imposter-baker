@@ -23,59 +23,79 @@ RunService:BindToRenderStep(binding, Enum.RenderPriority.Camera.Value + 1, funct
 		local available =
 			math.max(0, 1000 / Scene.TargetFps - (os.clock() - frameStarted) * 1000 - Scene.FrameReserveMilliseconds)
 		debug.profilebegin("Imposter updates")
-		active:update(camera.CFrame, camera.FieldOfView, available)
+		active:Update(camera.CFrame, camera.FieldOfView, available)
 		debug.profileend()
 	end
 end)
 
 local success, message = pcall(function()
 	local options: Package.Options = {
-		origin = CFrame.new(0, 0, 256),
-		updateBudget = { targetFps = Scene.TargetFps, maxMilliseconds = Scene.UpdateBudgetMilliseconds },
-		limits = {
-			maxTextureSize = 1024,
-			maxTexturePixels = 6 * 1024 * 1024,
-			maxEditableImages = 6,
-			maxEditableMeshes = 1,
-			maxInstances = Scene.InstanceCount,
-			maxModels = 4,
-			worldExtent = Scene.WorldExtent,
+		Origin = CFrame.new(Scene.Center),
+		UpdateBudget = { TargetFps = Scene.TargetFps, MaxMilliseconds = Scene.UpdateBudgetMilliseconds },
+		Lod = {
+			NearDistance = Scene.RealNearDistance,
+			FarDistance = Scene.RealFarDistance,
+			MaxRealInstances = Scene.MaxRealInstances,
+			MaxTransitionsPerFrame = 4,
+			MaxCreatesPerFrame = 1,
+		},
+		InstanceCache = { MaxInstances = 128, MaxPartsPerInstance = 128, MaxPartsPerFlush = 256 },
+		Limits = {
+			MaxTextureSize = 1024,
+			MaxTexturePixels = 6 * 1024 * 1024,
+			MaxEditableImages = 6,
+			MaxEditableMeshes = 1,
+			MaxInstances = Scene.InstanceCount,
+			MaxModels = 4,
+			WorldExtent = Scene.WorldExtent,
 		},
 	}
-	local renderer, createError = Package.new(options)
+	local renderer, createError = Package.New(options)
 	assert(renderer, createError)
 	batch = renderer
 	local sizes: { [string]: Vector3 } = {}
 	local entries: { Assets.Entry } = {}
 	for _, name in Assets.Names do
-		table.insert(entries, Assets.entry(name))
+		table.insert(entries, Assets.Entry(name))
 	end
 	-- Pack large sheets before the single-shot lilypad to avoid fragmentation.
 	table.sort(entries, function(a: Assets.Entry, b: Assets.Entry): boolean
-		local aSize = Package.Util.atlasSize(Assets.layout(a))
-		local bSize = Package.Util.atlasSize(Assets.layout(b))
-		return if aSize == bSize then a.name < b.name else aSize.X * aSize.Y > bSize.X * bSize.Y
+		local aSize = Package.Util.AtlasSize(Assets.Layout(a))
+		local bSize = Package.Util.AtlasSize(Assets.Layout(b))
+		return if aSize == bSize then a.Name < b.Name else aSize.X * aSize.Y > bSize.X * bSize.Y
 	end)
 	for _, entry in entries do
-		local loaded = Assets.load(entry)
-		local ok, loadError = renderer:register(entry.name, loaded.sources, Assets.layout(entry))
-		for _, image in loaded.images do
+		local loaded = Assets.Load(entry)
+		local ok, loadError = renderer:Register(entry.Name, loaded.Sources, Assets.Layout(entry))
+		for _, image in loaded.Images do
 			image:Destroy()
 		end
 		assert(ok, loadError)
-		sizes[entry.name] = entry.size
+		local templateOk, templateError = renderer:RegisterTemplate(entry.Name, entry.Template, {
+			BoundingBoxCFrame = CFrame.identity,
+			BoundingBoxSize = entry.Size,
+			CanCollide = entry.Name == "tree" or entry.Name == "pillar",
+			CanQuery = entry.Name == "tree" or entry.Name == "pillar",
+		})
+		assert(templateOk, templateError)
+		local warmed, warmError = renderer:Prewarm(entry.Name, Scene.RealPrewarmPerModel)
+		assert(warmed >= Scene.RealPrewarmPerModel, warmError)
+		sizes[entry.Name] = entry.Size
 	end
-	for _, placement in Scene.placements(Assets.Names, sizes) do
-		local handle, addError = renderer:add(placement.name, placement.cframe, sizes[placement.name])
+	for _, placement in Scene.Placements(Assets.Names, sizes) do
+		local handle, addError = renderer:Add(placement.Name, placement.CFrame, sizes[placement.Name])
 		assert(handle, addError)
+		handle:SetLodEnabled(not placement.Comparison)
 	end
 	ready = true
-	local usage = renderer:getUsage()
-	print(`Imposter demo: {usage.instances} imposters, {usage.editableMeshes} mesh, {usage.editableImages} shared maps`)
+	local usage = renderer:GetUsage()
+	print(
+		`Imposter demo: {usage.Instances} instances, {usage.EditableMeshes} imposter mesh, {usage.EditableImages} shared maps; up to {Scene.MaxRealInstances} nearby real models ({usage.CachedInstances} prewarmed)`
+	)
 end)
 if not success then
 	if batch then
-		batch:destroy()
+		batch:Destroy()
 		batch = nil
 	end
 	RunService:UnbindFromRenderStep(binding)
@@ -87,7 +107,7 @@ script.Destroying:Connect(function()
 	RunService:UnbindFromRenderStep(binding)
 	RunService:UnbindFromRenderStep(startBinding)
 	if batch then
-		batch:destroy()
+		batch:Destroy()
 		batch = nil
 	end
 end)

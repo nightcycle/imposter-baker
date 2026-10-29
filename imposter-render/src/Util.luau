@@ -3,39 +3,39 @@
 local Util = {}
 
 export type LayoutInput = {
-	panShotCount: number?,
-	tiltShotCount: number?,
-	maxResolutionPx: number?,
-	paddingPx: number?,
-	tiltConstraints: NumberRange?,
-	tiltOffset: number?,
+	PanShotCount: number?,
+	TiltShotCount: number?,
+	MaxResolutionPx: number?,
+	PaddingPx: number?,
+	TiltConstraints: NumberRange?,
+	TiltOffset: number?,
 }
 export type Layout = {
-	panShotCount: number,
-	tiltShotCount: number,
-	maxResolutionPx: number,
-	paddingPx: number,
-	tiltConstraints: NumberRange,
-	tiltOffset: number,
+	PanShotCount: number,
+	TiltShotCount: number,
+	MaxResolutionPx: number,
+	PaddingPx: number,
+	TiltConstraints: NumberRange,
+	TiltOffset: number,
 }
 export type Shot = {
-	index: number,
-	key: string,
-	yawDegrees: number,
-	pitchDegrees: number,
-	right: Vector3,
-	up: Vector3,
-	toward: Vector3,
-	position: Vector2,
+	Index: number,
+	Key: string,
+	YawDegrees: number,
+	PitchDegrees: number,
+	Right: Vector3,
+	Up: Vector3,
+	Toward: Vector3,
+	Position: Vector2,
 }
 export type Solution = {
-	shot: Shot,
-	cframe: CFrame,
-	size: Vector2,
-	uvMin: Vector2,
-	uvMax: Vector2,
-	distance: number,
-	projectedHeight: number,
+	Shot: Shot,
+	CFrame: CFrame,
+	Size: Vector2,
+	UVMin: Vector2,
+	UVMax: Vector2,
+	Distance: number,
+	ProjectedHeight: number,
 }
 
 local function finite(value: number): boolean
@@ -46,33 +46,33 @@ local function integer(value: number, lo: number, hi: number, name: string)
 	assert(finite(value) and value % 1 == 0 and value >= lo and value <= hi, `{name} must be an integer in {lo}..{hi}`)
 end
 
-function Util.layout(input: LayoutInput?): Layout
+function Util.Layout(input: LayoutInput?): Layout
 	local options: LayoutInput = input or {}
 	local result: Layout = {
-		panShotCount = options.panShotCount or 8,
-		tiltShotCount = options.tiltShotCount or 1,
-		maxResolutionPx = options.maxResolutionPx or 252,
-		paddingPx = if options.paddingPx == nil then 2 else options.paddingPx,
-		tiltConstraints = options.tiltConstraints or NumberRange.new(-180, 180),
-		tiltOffset = options.tiltOffset or 0,
+		PanShotCount = options.PanShotCount or 8,
+		TiltShotCount = options.TiltShotCount or 1,
+		MaxResolutionPx = options.MaxResolutionPx or 252,
+		PaddingPx = if options.PaddingPx == nil then 2 else options.PaddingPx,
+		TiltConstraints = options.TiltConstraints or NumberRange.new(-180, 180),
+		TiltOffset = options.TiltOffset or 0,
 	}
-	integer(result.panShotCount, 1, 256, "panShotCount")
-	integer(result.tiltShotCount, 1, 256, "tiltShotCount")
-	assert(result.panShotCount * result.tiltShotCount <= 4096, "at most 4096 shots are supported")
-	integer(result.maxResolutionPx, 1, 4096, "maxResolutionPx")
-	integer(result.paddingPx, 0, 64, "paddingPx")
-	assert(finite(result.tiltOffset) and math.abs(result.tiltOffset) <= 180, "tiltOffset must be in -180..180 degrees")
-	local range = result.tiltConstraints
+	integer(result.PanShotCount, 1, 256, "PanShotCount")
+	integer(result.TiltShotCount, 1, 256, "TiltShotCount")
+	assert(result.PanShotCount * result.TiltShotCount <= 4096, "at most 4096 shots are supported")
+	integer(result.MaxResolutionPx, 1, 4096, "MaxResolutionPx")
+	integer(result.PaddingPx, 0, 64, "PaddingPx")
+	assert(finite(result.TiltOffset) and math.abs(result.TiltOffset) <= 180, "TiltOffset must be in -180..180 degrees")
+	local range = result.TiltConstraints
 	assert(
 		finite(range.Min) and finite(range.Max) and range.Min >= -180 and range.Max <= 180 and range.Min <= range.Max,
-		"invalid tiltConstraints"
+		"invalid TiltConstraints"
 	)
 	return table.freeze(result)
 end
 
 -- Read the same root attributes as the baker. Use the generated layout if the
 -- source attributes have changed since baking or the images were resized.
-function Util.layoutFromAttributes(root: Instance): Layout
+function Util.LayoutFromAttributes(root: Instance): Layout
 	local input: LayoutInput = {}
 	local values: { [string]: number } = {}
 	for _, name in { "PanShotCount", "TiltShotCount", "MaxResolutionPx", "PaddingPx", "TiltOffset" } do
@@ -82,39 +82,39 @@ function Util.layoutFromAttributes(root: Instance): Layout
 			values[name] = value
 		end
 	end
-	input.panShotCount = values.PanShotCount
-	input.tiltShotCount = values.TiltShotCount
-	input.maxResolutionPx = values.MaxResolutionPx
-	input.paddingPx = values.PaddingPx
-	input.tiltOffset = values.TiltOffset
+	input.PanShotCount = values.PanShotCount
+	input.TiltShotCount = values.TiltShotCount
+	input.MaxResolutionPx = values.MaxResolutionPx
+	input.PaddingPx = values.PaddingPx
+	input.TiltOffset = values.TiltOffset
 	local range = root:GetAttribute("TiltConstraints")
 	if range ~= nil then
 		assert(typeof(range) == "NumberRange", "TiltConstraints must be a NumberRange")
-		input.tiltConstraints = range
+		input.TiltConstraints = range
 	end
-	return Util.layout(input)
+	return Util.Layout(input)
 end
 
-function Util.tileSize(layout: Layout): number
-	return layout.maxResolutionPx + 2 * layout.paddingPx
+function Util.TileSize(layout: Layout): number
+	return layout.MaxResolutionPx + 2 * layout.PaddingPx
 end
 
-function Util.grid(layout: Layout): Vector2
-	local count = layout.panShotCount * layout.tiltShotCount
+function Util.Grid(layout: Layout): Vector2
+	local count = layout.PanShotCount * layout.TiltShotCount
 	local columns = math.ceil(math.sqrt(count))
 	return Vector2.new(columns, math.ceil(count / columns))
 end
 
-function Util.atlasSize(layout: Layout): Vector2
-	return Util.grid(layout) * Util.tileSize(layout)
+function Util.AtlasSize(layout: Layout): Vector2
+	return Util.Grid(layout) * Util.TileSize(layout)
 end
 
-function Util.shotKey(index: number): string
+function Util.ShotKey(index: number): string
 	integer(index, 0, 4095, "index")
 	return string.format("shot_%04d", index)
 end
 
-function Util.basis(yawDegrees: number, pitchDegrees: number): (Vector3, Vector3, Vector3)
+function Util.Basis(yawDegrees: number, pitchDegrees: number): (Vector3, Vector3, Vector3)
 	local yaw = math.rad(yawDegrees)
 	local pitch = math.rad(pitchDegrees)
 	local right = Vector3.new(math.cos(yaw), 0, -math.sin(yaw))
@@ -122,44 +122,44 @@ function Util.basis(yawDegrees: number, pitchDegrees: number): (Vector3, Vector3
 	return right, toward:Cross(right), toward
 end
 
-function Util.shots(layout: Layout): { Shot }
+function Util.Shots(layout: Layout): { Shot }
 	local shots: { Shot } = {}
-	local grid = Util.grid(layout)
-	for index = 0, layout.panShotCount * layout.tiltShotCount - 1 do
-		local pan = index % layout.panShotCount
-		local tilt = math.floor(index / layout.panShotCount)
-		local range = layout.tiltConstraints
-		local yaw = 360 * pan / layout.panShotCount
+	local grid = Util.Grid(layout)
+	for index = 0, layout.PanShotCount * layout.TiltShotCount - 1 do
+		local pan = index % layout.PanShotCount
+		local tilt = math.floor(index / layout.PanShotCount)
+		local range = layout.TiltConstraints
+		local yaw = 360 * pan / layout.PanShotCount
 		local pitch = (
-			if layout.tiltShotCount == 1
+			if layout.TiltShotCount == 1
 				then (range.Min + range.Max) / 2
-				else range.Min + (range.Max - range.Min) * tilt / (layout.tiltShotCount - 1)
-		) + layout.tiltOffset
-		local right, up, toward = Util.basis(yaw, pitch)
+				else range.Min + (range.Max - range.Min) * tilt / (layout.TiltShotCount - 1)
+		) + layout.TiltOffset
+		local right, up, toward = Util.Basis(yaw, pitch)
 		table.insert(
 			shots,
 			table.freeze({
-				index = index,
-				key = Util.shotKey(index),
-				yawDegrees = yaw,
-				pitchDegrees = pitch,
-				right = right,
-				up = up,
-				toward = toward,
-				position = Vector2.new(index % grid.X, math.floor(index / grid.X)) * Util.tileSize(layout),
+				Index = index,
+				Key = Util.ShotKey(index),
+				YawDegrees = yaw,
+				PitchDegrees = pitch,
+				Right = right,
+				Up = up,
+				Toward = toward,
+				Position = Vector2.new(index % grid.X, math.floor(index / grid.X)) * Util.TileSize(layout),
 			})
 		)
 	end
 	return table.freeze(shots)
 end
 
-function Util.selectShot(localDirection: Vector3, shots: { Shot }): Shot
+function Util.SelectShot(localDirection: Vector3, shots: { Shot }): Shot
 	assert(#shots > 0, "shot list must not be empty")
 	local direction = if localDirection.Magnitude > 1e-8 then localDirection.Unit else Vector3.zAxis
 	local best = shots[1]
 	local score = -math.huge
 	for _, shot in shots do
-		local candidate = direction:Dot(shot.toward)
+		local candidate = direction:Dot(shot.Toward)
 		if candidate > score + 1e-7 then
 			best = shot
 			score = candidate
@@ -168,7 +168,7 @@ function Util.selectShot(localDirection: Vector3, shots: { Shot }): Shot
 	return best
 end
 
-function Util.solve(
+function Util.Solve(
 	cameraCFrame: CFrame,
 	verticalFieldOfView: number,
 	boundingBoxCFrame: CFrame,
@@ -190,25 +190,25 @@ function Util.solve(
 	local relative = cameraCFrame.Position - boundingBoxCFrame.Position
 	local distance = relative.Magnitude
 	local toward = if distance > 1e-8 then relative.Unit else -cameraCFrame.LookVector
-	assert(finite(distance), "camera and bounding box positions must be finite")
+	assert(finite(distance), "Camera and bounding box positions must be finite")
 	local localToward = boundingBoxCFrame:VectorToObjectSpace(toward)
-	local shot = Util.selectShot(localToward, preparedShots or Util.shots(layout))
+	local shot = Util.SelectShot(localToward, preparedShots or Util.Shots(layout))
 	-- Geometry and tangent-space normals share the exact capture orientation.
 	-- Turning the plane between shots would rotate the baked surface lighting.
-	local right = boundingBoxCFrame:VectorToWorldSpace(shot.right)
-	local up = boundingBoxCFrame:VectorToWorldSpace(shot.up)
-	toward = boundingBoxCFrame:VectorToWorldSpace(shot.toward)
-	local atlasSize = Util.atlasSize(layout)
-	local start = shot.position + Vector2.one * layout.paddingPx
+	local right = boundingBoxCFrame:VectorToWorldSpace(shot.Right)
+	local up = boundingBoxCFrame:VectorToWorldSpace(shot.Up)
+	toward = boundingBoxCFrame:VectorToWorldSpace(shot.Toward)
+	local atlasSize = Util.AtlasSize(layout)
+	local start = shot.Position + Vector2.one * layout.PaddingPx
 	local size = boundingBoxSize.Magnitude
 	return {
-		shot = shot,
-		cframe = CFrame.fromMatrix(boundingBoxCFrame.Position, right, up, toward),
-		size = Vector2.one * size,
-		uvMin = start / atlasSize,
-		uvMax = (start + Vector2.one * layout.maxResolutionPx) / atlasSize,
-		distance = distance,
-		projectedHeight = size / (2 * math.max(distance, 1e-8) * math.tan(math.rad(verticalFieldOfView) / 2)),
+		Shot = shot,
+		CFrame = CFrame.fromMatrix(boundingBoxCFrame.Position, right, up, toward),
+		Size = Vector2.one * size,
+		UVMin = start / atlasSize,
+		UVMax = (start + Vector2.one * layout.MaxResolutionPx) / atlasSize,
+		Distance = distance,
+		ProjectedHeight = size / (2 * math.max(distance, 1e-8) * math.tan(math.rad(verticalFieldOfView) / 2)),
 	}
 end
 
