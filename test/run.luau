@@ -9,21 +9,24 @@ local globals = {
 	Vector3 = roblox.Vector3,
 	CFrame = roblox.CFrame,
 	NumberRange = roblox.NumberRange,
+	Instance = roblox.Instance,
 }
 local modules = {}
-for _, name in { "Util", "Limits", "Atlas" } do
+for _, name in { "Util", "Limits", "Atlas", "Scheduler" } do
 	modules[name] =
 		luau.load(fs.readFile(`imposter-render/src/{name}.luau`), { debugName = name, environment = globals })()
 end
 local testGlobals = table.clone(globals)
 testGlobals.game = {
 	GetService = function()
-		return { ImposterRender = { Util = "Util", Limits = "Limits", Atlas = "Atlas" } }
+		return { ImposterRender = { Util = "Util", Limits = "Limits", Atlas = "Atlas", Scheduler = "Scheduler" } }
 	end,
 }
 testGlobals.require = function(name: string)
 	return modules[name]
 end
-local test =
-	luau.load(fs.readFile("test/luau/Util.spec.luau"), { debugName = "Util.spec", environment = testGlobals })()
-test()
+for _, name in { "Util", "Scheduler" } do
+	local test =
+		luau.load(fs.readFile(`test/luau/{name}.spec.luau`), { debugName = `{name}.spec`, environment = testGlobals })()
+	test()
+end

@@ -8,7 +8,10 @@
     "tiltConstraints": [
       -180.0,
       180.0
-    ]
+    ],
+    "tiltOffset": 0.0,
+    "ambientOcclusionStrength": 0.75,
+    "ambientOcclusionRadiusRatio": 0.08
   },
   "projection": "orthographic",
   "normalConvention": "OpenGL; +R=quad right, +G=quad up, +B=toward camera",
@@ -40,11 +43,13 @@
     768
   ],
   "layers": {
+    "albedo": "tree.albedo.png",
     "color": "tree.png",
     "depth": "tree.depth.png",
     "emissive": "tree.emissive.png",
     "metalness": "tree.metalness.png",
     "normal": "tree.normal.png",
+    "occlusion": "tree.occlusion.png",
     "opacity": "tree.opacity.png",
     "roughness": "tree.roughness.png"
   },

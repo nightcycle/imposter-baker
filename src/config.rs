@@ -11,6 +11,19 @@ pub struct Settings {
     pub max_resolution_px: u32,
     pub padding_px: u32,
     pub tilt_constraints: [f32; 2],
+    #[serde(default)]
+    pub tilt_offset: f32,
+    #[serde(default = "default_ao_strength")]
+    pub ambient_occlusion_strength: f32,
+    #[serde(default = "default_ao_radius")]
+    pub ambient_occlusion_radius_ratio: f32,
+}
+
+fn default_ao_strength() -> f32 {
+    0.75
+}
+fn default_ao_radius() -> f32 {
+    0.08
 }
 
 impl Default for Settings {
@@ -21,6 +34,9 @@ impl Default for Settings {
             max_resolution_px: 252,
             padding_px: 2,
             tilt_constraints: [-180.0, 180.0],
+            tilt_offset: 0.0,
+            ambient_occlusion_strength: default_ao_strength(),
+            ambient_occlusion_radius_ratio: default_ao_radius(),
         }
     }
 }
@@ -57,6 +73,27 @@ impl Settings {
                     bail!("TiltConstraints must be a NumberRange in degrees");
                 }
             }
+            for (name, target) in [
+                ("TiltOffset", &mut s.tilt_offset),
+                (
+                    "AmbientOcclusionStrength",
+                    &mut s.ambient_occlusion_strength,
+                ),
+                (
+                    "AmbientOcclusionRadiusRatio",
+                    &mut s.ambient_occlusion_radius_ratio,
+                ),
+            ] {
+                if let Some(value) = a.get(name) {
+                    *target = match value {
+                        Variant::Float64(n) => *n as f32,
+                        Variant::Float32(n) => *n,
+                        Variant::Int32(n) => *n as f32,
+                        Variant::Int64(n) => *n as f32,
+                        _ => bail!("{name} must be a number"),
+                    };
+                }
+            }
         }
         s.validate()?;
         Ok(s)
@@ -78,6 +115,20 @@ impl Settings {
         );
         ensure!(self.padding_px <= 64, "PaddingPx must be 0..64");
         let [lo, hi] = self.tilt_constraints;
+        ensure!(
+            self.ambient_occlusion_strength.is_finite()
+                && (0.0..=1.0).contains(&self.ambient_occlusion_strength),
+            "AmbientOcclusionStrength must be in 0..1"
+        );
+        ensure!(
+            self.ambient_occlusion_radius_ratio.is_finite()
+                && (0.0..=0.5).contains(&self.ambient_occlusion_radius_ratio),
+            "AmbientOcclusionRadiusRatio must be in 0..0.5 of the bounds diagonal"
+        );
+        ensure!(
+            self.tilt_offset.is_finite() && (-180.0..=180.0).contains(&self.tilt_offset),
+            "TiltOffset must be finite and within -180..180 degrees"
+        );
         ensure!(
             lo.is_finite() && hi.is_finite() && lo >= -180.0 && hi <= 180.0 && lo <= hi,
             "TiltConstraints must be ordered, finite, and within -180..180 degrees"
@@ -103,7 +154,10 @@ impl Settings {
         } else {
             lo + (hi - lo) * tilt as f32 / (self.tilt_shot_count - 1) as f32
         };
-        [360.0 * pan as f32 / self.pan_shot_count as f32, pitch]
+        [
+            360.0 * pan as f32 / self.pan_shot_count as f32,
+            pitch + self.tilt_offset,
+        ]
     }
 }
 

@@ -49,7 +49,37 @@ return function()
 		assert(math.abs(fixed.cframe.ZVector:Dot(cf.UpVector) - 0.5) < 1e-5)
 	end
 	local tilted = Util.solve(elevatedCamera, 70, cf, size, Util.layout({ tiltShotCount = 3 }))
-	assert((tilted.cframe.ZVector - (elevatedCamera.Position - cf.Position).Unit).Magnitude < 1e-5)
+	assert((tilted.cframe.ZVector - cf:VectorToWorldSpace(tilted.shot.toward)).Magnitude < 1e-5)
+	-- Both geometry and mapped normals stay fixed until crossing a view boundary.
+	for _, sample in { { -22.4, 0 }, { 0, 0 }, { 22.4, 0 }, { 22.6, 1 }, { 45, 1 }, { 337.4, 7 } } do
+		local _, _, direction = Util.basis(sample[1], 0)
+		local view = Util.solve(cf * CFrame.new(direction * 100), 70, cf, size, layout, shots)
+		assert(view.shot.index == sample[2])
+		assert((view.cframe.RightVector - cf:VectorToWorldSpace(view.shot.right)).Magnitude < 1e-5)
+		assert((view.cframe.UpVector - cf:VectorToWorldSpace(view.shot.up)).Magnitude < 1e-5)
+		assert((view.cframe.ZVector - cf:VectorToWorldSpace(view.shot.toward)).Magnitude < 1e-5)
+	end
+	local attributes = Instance.new("Folder")
+	attributes:SetAttribute("PanShotCount", 1)
+	attributes:SetAttribute("TiltShotCount", 1)
+	attributes:SetAttribute("TiltOffset", 90)
+	local topDown = Util.layoutFromAttributes(attributes)
+	assert(topDown.tiltOffset == 90 and #Util.shots(topDown) == 1)
+	for _, yaw in { 0, 30, 90, 180, 270 } do
+		local _, _, direction = Util.basis(yaw, 45)
+		local view = Util.solve(cf * CFrame.new(direction * 100), 70, cf, size, topDown)
+		assert(view.shot.index == 0 and view.shot.pitchDegrees == 90)
+		assert((view.cframe.ZVector - cf.UpVector).Magnitude < 1e-5)
+		assert(
+			(view.cframe.RightVector - cf.RightVector).Magnitude < 1e-5,
+			"top-down views must not spin with the camera"
+		)
+	end
+	attributes:SetAttribute("TiltOffset", "90")
+	assert(not pcall(Util.layoutFromAttributes, attributes))
+	attributes:Destroy()
+	assert(not pcall(Util.layout, { tiltOffset = math.huge }))
+	assert(not pcall(Util.layout, { tiltOffset = 181 }))
 	assert(not pcall(Util.layout, { panShotCount = 0 }))
 	assert(not pcall(Util.layout, { paddingPx = -1 }))
 	assert(not pcall(Util.solve, camera, 180, cf, size, layout))

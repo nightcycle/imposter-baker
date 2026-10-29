@@ -83,8 +83,8 @@ pub fn bake(scene: &scene::Scene, output: &Path, options: &BakeOptions) -> Resul
     };
     // Output buffers + sample accumulators + up to 256 compact depth hits per
     // pixel + triangle/geometry allowance. Checked before image allocation.
-    let estimate = pixels * 28
-        + s.max_resolution_px as u64 * s.max_resolution_px as u64 * (112 + 24 + 256 * 24)
+    let estimate = pixels * (LAYERS.len() as u64 * 4)
+        + s.max_resolution_px as u64 * s.max_resolution_px as u64 * (112 + 24 + 256 * 24 + 4)
         + scene
             .objects
             .iter()
@@ -179,7 +179,7 @@ pub fn bake(scene: &scene::Scene, output: &Path, options: &BakeOptions) -> Resul
     );
     fs::create_dir(&staging)?;
     let result = (|| -> Result<Manifest> {
-        let mut atlas: Option<[RgbaImage; 7]> = if sheet {
+        let mut atlas: Option<render::Frame> = if sheet {
             Some(std::array::from_fn(|_| RgbaImage::new(width, height)))
         } else {
             None
@@ -248,13 +248,14 @@ pub fn bake(scene: &scene::Scene, output: &Path, options: &BakeOptions) -> Resul
         fs::write(
             staging.join(luau_name),
             format!(
-                "--!strict\n-- Generated bake layout. Upload PNGs and supply their Content/asset URLs separately.\nreturn table.freeze({{\n\tpanShotCount = {},\n\ttiltShotCount = {},\n\tmaxResolutionPx = {},\n\tpaddingPx = {},\n\ttiltConstraints = NumberRange.new({}, {}),\n}})\n",
+                "--!strict\n-- Generated bake layout. Upload PNGs and supply their Content/asset URLs separately.\nreturn table.freeze({{\n\tpanShotCount = {},\n\ttiltShotCount = {},\n\tmaxResolutionPx = {},\n\tpaddingPx = {},\n\ttiltConstraints = NumberRange.new({}, {}),\n\ttiltOffset = {},\n}})\n",
                 s.pan_shot_count,
                 s.tilt_shot_count,
                 s.max_resolution_px,
                 s.padding_px,
                 s.tilt_constraints[0],
-                s.tilt_constraints[1]
+                s.tilt_constraints[1],
+                s.tilt_offset
             ),
         )?;
         for target in &paths {

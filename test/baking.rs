@@ -73,6 +73,40 @@ fn attributes_defaults_overrides_and_invalid_values() {
 }
 
 #[test]
+fn occlusion_attributes_and_raw_albedo_export() {
+    let attrs = Attributes::new()
+        .with("AmbientOcclusionStrength", 0.0)
+        .with("AmbientOcclusionRadiusRatio", 0.1);
+    let settings = Settings::from_attributes(Some(&attrs)).unwrap();
+    assert_eq!(settings.ambient_occlusion_strength, 0.0);
+    assert_eq!(settings.ambient_occlusion_radius_ratio, 0.1);
+    for name in ["AmbientOcclusionStrength", "AmbientOcclusionRadiusRatio"] {
+        for value in [-1.0, 1.1, f64::NAN, f64::INFINITY] {
+            assert!(Settings::from_attributes(Some(&Attributes::new().with(name, value))).is_err());
+        }
+    }
+    let mut scene = cube();
+    scene.settings.ambient_occlusion_strength = 0.0;
+    let frame = render::render(&scene, 0, 4).unwrap();
+    assert_eq!(frame[0], frame[8], "strength zero preserves raw albedo");
+    assert!(
+        frame[7].pixels().filter(|p| p[3] > 0).all(|p| p[0] == 255),
+        "flat faces and cutout edges stay unoccluded"
+    );
+    let mut old = serde_json::to_value(Settings::default()).unwrap();
+    old.as_object_mut()
+        .unwrap()
+        .remove("ambientOcclusionStrength");
+    old.as_object_mut()
+        .unwrap()
+        .remove("ambientOcclusionRadiusRatio");
+    assert_eq!(
+        serde_json::from_value::<Settings>(old).unwrap(),
+        Settings::default()
+    );
+}
+
+#[test]
 fn layout_and_camera_basis_contract() {
     let s = Settings::default();
     assert_eq!(s.tile_size(), 256);
@@ -87,6 +121,54 @@ fn layout_and_camera_basis_contract() {
             assert!((r.cross(u) - t).length() < 1e-5);
         }
     }
+}
+
+#[test]
+fn tilt_offset_attributes_bake_top_down_and_round_trip_layouts() {
+    let attributes = Attributes::new()
+        .with("PanShotCount", 1.0)
+        .with("TiltShotCount", 1.0)
+        .with("TiltOffset", 90.0);
+    let settings = Settings::from_attributes(Some(&attributes)).unwrap();
+    assert_eq!(settings.angles(0), [0.0, 90.0]);
+    assert!((basis(0.0, 90.0)[2] - Vec3::Y).length() < 1e-6);
+    for value in [f64::NAN, f64::INFINITY, -181.0, 181.0] {
+        assert!(
+            Settings::from_attributes(Some(&Attributes::new().with("TiltOffset", value))).is_err()
+        );
+    }
+    assert!(Settings::from_attributes(Some(&Attributes::new().with("TiltOffset", "90"))).is_err());
+    let mut old_layout = serde_json::to_value(Settings::default()).unwrap();
+    old_layout.as_object_mut().unwrap().remove("tiltOffset");
+    assert_eq!(
+        serde_json::from_value::<Settings>(old_layout)
+            .unwrap()
+            .tilt_offset,
+        0.0
+    );
+    let mut scene = cube();
+    scene.settings = Settings {
+        max_resolution_px: 24,
+        ..settings
+    };
+    let tmp = tempfile::tempdir().unwrap();
+    let manifest = bake(&scene, &tmp.path().join("top.png"), &BakeOptions::default()).unwrap();
+    assert_eq!(manifest.shots.len(), 1);
+    assert_eq!(manifest.shots[0].pitch_degrees, 90.0);
+    assert!(
+        fs::read_to_string(tmp.path().join("top.imposter.luau"))
+            .unwrap()
+            .contains("tiltOffset = 90")
+    );
+    let exported: serde_json::Value =
+        serde_json::from_slice(&fs::read(tmp.path().join("top.imposter.json")).unwrap()).unwrap();
+    assert_eq!(exported["settings"]["tiltOffset"], 90.0);
+    let normal = image::open(tmp.path().join("top.normal.png"))
+        .unwrap()
+        .to_rgba8();
+    let pixel = normal.get_pixel(14, 14).0;
+    assert!(pixel[0].abs_diff(128) <= 1 && pixel[1].abs_diff(128) <= 1);
+    assert_eq!([pixel[2], pixel[3]], [255, 255]);
 }
 
 #[test]
@@ -278,7 +360,7 @@ fn legacy_texture_tint_matches_linear_multiplication_without_changing_surface_ti
     s.objects[0].material.color = Vec3::splat(0.5);
     let untextured = render::render(&s, 0, 1).unwrap();
     assert_eq!(untextured[0].get_pixel(14, 14).0, [128, 128, 128, 255]);
-    for (texture_value, expected) in [(255, 188), (128, 92)] {
+    for (texture_value, expected) in [(255, 188), (128, 137), (64, 99)] {
         s.objects[0].material.color_map = Some(scene::Texture(std::sync::Arc::new(
             image::RgbaImage::from_pixel(
                 1,
@@ -388,7 +470,7 @@ fn demo_models() {
             },
         )
         .unwrap();
-        assert_eq!(manifest.shots.len(), 8);
+        assert_eq!(manifest.shots.len(), s.settings.count() as usize);
         let image = image::open(format!("test/demo/{name}.png"))
             .unwrap()
             .to_rgba8();

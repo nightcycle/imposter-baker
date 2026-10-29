@@ -8,7 +8,10 @@
     "tiltConstraints": [
       -180.0,
       180.0
-    ]
+    ],
+    "tiltOffset": 0.0,
+    "ambientOcclusionStrength": 0.75,
+    "ambientOcclusionRadiusRatio": 0.08
   },
   "projection": "orthographic",
   "normalConvention": "OpenGL; +R=quad right, +G=quad up, +B=toward camera",
@@ -53,11 +56,13 @@
         256
       ],
       "images": {
+        "albedo": "shot_0000/albedo.png",
         "color": "shot_0000/color.png",
         "depth": "shot_0000/depth.png",
         "emissive": "shot_0000/emissive.png",
         "metalness": "shot_0000/metalness.png",
         "normal": "shot_0000/normal.png",
+        "occlusion": "shot_0000/occlusion.png",
         "opacity": "shot_0000/opacity.png",
         "roughness": "shot_0000/roughness.png"
       }
@@ -74,11 +79,13 @@
         256
       ],
       "images": {
+        "albedo": "shot_0001/albedo.png",
         "color": "shot_0001/color.png",
         "depth": "shot_0001/depth.png",
         "emissive": "shot_0001/emissive.png",
         "metalness": "shot_0001/metalness.png",
         "normal": "shot_0001/normal.png",
+        "occlusion": "shot_0001/occlusion.png",
         "opacity": "shot_0001/opacity.png",
         "roughness": "shot_0001/roughness.png"
       }
@@ -95,11 +102,13 @@
         256
       ],
       "images": {
+        "albedo": "shot_0002/albedo.png",
         "color": "shot_0002/color.png",
         "depth": "shot_0002/depth.png",
         "emissive": "shot_0002/emissive.png",
         "metalness": "shot_0002/metalness.png",
         "normal": "shot_0002/normal.png",
+        "occlusion": "shot_0002/occlusion.png",
         "opacity": "shot_0002/opacity.png",
         "roughness": "shot_0002/roughness.png"
       }
@@ -116,11 +125,13 @@
         256
       ],
       "images": {
+        "albedo": "shot_0003/albedo.png",
         "color": "shot_0003/color.png",
         "depth": "shot_0003/depth.png",
         "emissive": "shot_0003/emissive.png",
         "metalness": "shot_0003/metalness.png",
         "normal": "shot_0003/normal.png",
+        "occlusion": "shot_0003/occlusion.png",
         "opacity": "shot_0003/opacity.png",
         "roughness": "shot_0003/roughness.png"
       }
@@ -137,11 +148,13 @@
         256
       ],
       "images": {
+        "albedo": "shot_0004/albedo.png",
         "color": "shot_0004/color.png",
         "depth": "shot_0004/depth.png",
         "emissive": "shot_0004/emissive.png",
         "metalness": "shot_0004/metalness.png",
         "normal": "shot_0004/normal.png",
+        "occlusion": "shot_0004/occlusion.png",
         "opacity": "shot_0004/opacity.png",
         "roughness": "shot_0004/roughness.png"
       }
@@ -158,11 +171,13 @@
         256
       ],
       "images": {
+        "albedo": "shot_0005/albedo.png",
         "color": "shot_0005/color.png",
         "depth": "shot_0005/depth.png",
         "emissive": "shot_0005/emissive.png",
         "metalness": "shot_0005/metalness.png",
         "normal": "shot_0005/normal.png",
+        "occlusion": "shot_0005/occlusion.png",
         "opacity": "shot_0005/opacity.png",
         "roughness": "shot_0005/roughness.png"
       }
@@ -179,11 +194,13 @@
         256
       ],
       "images": {
+        "albedo": "shot_0006/albedo.png",
         "color": "shot_0006/color.png",
         "depth": "shot_0006/depth.png",
         "emissive": "shot_0006/emissive.png",
         "metalness": "shot_0006/metalness.png",
         "normal": "shot_0006/normal.png",
+        "occlusion": "shot_0006/occlusion.png",
         "opacity": "shot_0006/opacity.png",
         "roughness": "shot_0006/roughness.png"
       }
@@ -200,11 +217,13 @@
         256
       ],
       "images": {
+        "albedo": "shot_0007/albedo.png",
         "color": "shot_0007/color.png",
         "depth": "shot_0007/depth.png",
         "emissive": "shot_0007/emissive.png",
         "metalness": "shot_0007/metalness.png",
         "normal": "shot_0007/normal.png",
+        "occlusion": "shot_0007/occlusion.png",
         "opacity": "shot_0007/opacity.png",
         "roughness": "shot_0007/roughness.png"
       }

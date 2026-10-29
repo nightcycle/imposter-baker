@@ -12,6 +12,7 @@ return function()
 	local options: Package.Options = {
 		parent = container,
 		layers = enabledLayers,
+		updateBudget = { targetFps = 60, maxMilliseconds = 16 },
 		limits = { maxTextureSize = 128, maxInstances = 2 },
 	}
 	local renderer, createError = Package.new(options)
@@ -31,8 +32,37 @@ return function()
 	assert(renderer:getUsage().editableMeshes == 1)
 	assert(renderer:getUsage().editableImages == 1)
 	assert(renderer:getUsage().instances == 2)
+	renderer:update(CFrame.new(0, 0, 20), 70, 0)
+	assert(renderer:getUsage().updatedInstances == 0 and renderer:getUsage().pendingInstances == 2)
 	renderer:update(CFrame.new(0, 0, 20), 70)
+	assert(renderer:getUsage().updatedInstances == 2 and renderer:getUsage().pendingInstances == 0)
+	local function positionSum(): Vector3
+		local sum = Vector3.zero
+		for _, vertex in renderer.mesh:GetVertices() do
+			sum += renderer.mesh:GetPosition(vertex)
+		end
+		return sum
+	end
+	local initial = positionSum()
+	renderer:update(CFrame.new(0, 0, 21), 70)
+	assert((positionSum() - initial).Magnitude < 1e-5, "same capture must keep geometry fixed")
 	a:update(CFrame.new(-4, 0, 0), Vector3.one * 2)
+	renderer:update(CFrame.new(0, 0, 21), 70)
+	assert(
+		(positionSum() - initial - Vector3.new(-4, 0, 0)).Magnitude < 1e-4,
+		"bounds changes must invalidate cached geometry"
+	)
+	local moved = positionSum()
+	renderer:setUpdateBudget({ targetFps = 240, maxMilliseconds = 0 })
+	renderer.part.CFrame = CFrame.new(1, 0, 0)
+	renderer:update(CFrame.new(0, 0, 21), 70)
+	assert(positionSum() == moved, "zero budget must defer writes")
+	renderer:setUpdateBudget({ targetFps = 60, maxMilliseconds = 16 })
+	renderer:update(CFrame.new(0, 0, 21), 70)
+	assert(
+		(positionSum() - moved + Vector3.new(8, 0, 0)).Magnitude < 1e-4,
+		"batch movement must preserve world-space bounds"
+	)
 	renderer:update(CFrame.new(0, 4, -20), 55)
 	assert(not renderer:unregister("cube"))
 	a:destroy()
@@ -54,7 +84,11 @@ return function()
 	renderer:destroy()
 	assert(renderer:getUsage().editableImages == 0 and renderer:getUsage().editableMeshes == 0)
 
-	local pbrOptions: Package.Options = { parent = container, limits = { maxTextureSize = 128, maxInstances = 2 } }
+	local pbrOptions: Package.Options = {
+		parent = container,
+		limits = { maxTextureSize = 128, maxInstances = 2 },
+		updateBudget = { targetFps = 60, maxMilliseconds = 16 },
+	}
 	local pbr, pbrError = Package.new(pbrOptions)
 	assert(pbr, pbrError)
 	local tile: EditableImage? = assetService:CreateEditableImage({ Size = Vector2.new(20, 20) })

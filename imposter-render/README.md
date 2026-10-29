@@ -92,6 +92,7 @@ local ok, err = batch:register("grass-v1", { color = colors }, {
     maxResolutionPx = 252,
     paddingPx = 2,
     tiltConstraints = NumberRange.new(-180, 180),
+    tiltOffset = 0,
 })
 ```
 
@@ -101,7 +102,15 @@ By default, the batch enables `color`, `normal`, `roughness`, `metalness`, and `
 
 The `id` is a model-version cache key. Register it once, then call `add` for each copy. Registering an existing ID fails rather than silently changing active resources. Destroy its handles and `unregister` before replacing it. `Handle:update(cf, size)` moves/resizes one instance. `Handle:destroy()` and `Renderer:destroy()` are idempotent.
 
-## Limits and resource lifetime
+## Frame scheduling
+
+Updates default to a 240 FPS target with one quarter of the frame interval (about 1.04 ms) available to the renderer. Configure `Options.updateBudget`, or change it with `batch:setUpdateBudget({ targetFps = 240, maxMilliseconds = 1 })`. `batch:update(cameraCFrame, verticalFov, availableMilliseconds)` optionally accepts the remaining CPU headroom for this frame; zero defers all work. The effective budget is the smaller of that headroom and the configured maximum.
+
+Distance-queue construction and mesh updates both share the deadline. Each pass snapshots the camera position, builds its queue incrementally, then processes the closest model centers first. Unfinished work resumes next frame. The pass finishes before distances are refreshed, preventing distant instances from starving during continuous camera motion. Each visited instance uses the current camera and latest model bounds to choose its shot, including continuously moving handles. Removed and reused handles invalidate stale queue entries. New instances may remain hidden until their first scheduled update.
+
+`getUsage()` exposes `pendingInstances` (remaining queue estimate), `checkedInstances`, `updatedInstances`, and `updateMilliseconds` for profiling. The last three describe the most recent update call. Unchanged shots skip mesh writes. This is a cooperative CPU budget: one in-progress item can finish slightly past the deadline. It cannot guarantee total game FPS or account for GPU time; reserve time for the rest of your game's frame, and share the available budget when updating multiple batches. The demo caps this work at 1 ms and reserves another 1 ms after accounting for earlier render callbacks.
+
+## Allocation limits
 
 `Options.limits` configures local soft budgets. `getUsage()` reports actual batch counts and texture pixels; `setLimits()` can change logical limits within allocated capacity. `ImposterRender.Limits.resolve()` validates and freezes a budget without allocating anything. Budgets are per batch; applications that create multiple batches should account for their aggregate usage.
 
@@ -123,9 +132,9 @@ Texture dimensions, mesh capacity growth, and `worldExtent` changes require a ne
 
 ## Utilities and types
 
-The header exports `Util`, `Atlas`, and `Limits`, plus `Layout`, `LayoutInput`, `Shot`, `Solution`, `Layer`, `ImageContent`, `Source`, `Sources`, `Options`, `LimitOptions`, `Budget`, `Usage`, `Renderer`, and `Handle` types.
+The header exports `Util`, `Atlas`, `Limits`, and `Scheduler`, plus `Layout`, `LayoutInput`, `Shot`, `Solution`, `Layer`, `ImageContent`, `Source`, `Sources`, `Options`, `LimitOptions`, `Budget`, `UpdateBudgetInput`, `UpdateBudget`, `Usage`, `Renderer`, and `Handle` types. `Scheduler` exposes the pure distance queue and budget validation for custom renderers and deterministic tests.
 
-`Util` exports `layout`, `tileSize`, `grid`, `atlasSize`, `shotKey`, `basis`, `shots`, `selectShot`, and `solve`. These functions require no editable assets. `Atlas` exports `new`, `allocate`, and `release` for custom packing integrations.
+`Util` exports `layout`, `layoutFromAttributes`, `tileSize`, `grid`, `atlasSize`, `shotKey`, `basis`, `shots`, `selectShot`, and `solve`. These functions require no editable assets. `Atlas` exports `new`, `allocate`, and `release` for custom packing integrations.
 
 ```lua
 local layout = ImposterRender.Util.layout()
@@ -135,4 +144,8 @@ local result = ImposterRender.Util.solve(cameraCFrame, verticalFovDegrees, boxCF
 -- result.projectedHeight is frame height as a fraction of viewport height.
 ```
 
-The solver chooses the closest sampled direction by dot product, including polar/inverted tilts, with deterministic first-index ties. With only one distinct tilt angle, the quad turns around the model's local up axis while retaining the baked pitch; the default level bake stays upright even when viewed from above. With multiple tilt angles, the quad faces the camera and its roll follows the chosen capture basis. FOV affects projected size reporting; the physical quad remains in world units. Sampling uses nearest views, with no crossfade, parallax correction, or depth reconstruction. Orthographic capture is intended for distant objects.
+The solver chooses the closest sampled direction by dot product, including polar/inverted tilts, with deterministic first-index ties. The quad uses that shot's exact yaw, pitch, and roll relative to the model bounds. With eight level shots, rotation changes in 45° steps at the 22.5° midpoints. Between boundaries, geometry and normal-map lighting keep their baked orientation; single-level bakes stay upright. Mesh writes are skipped until the shot or model/batch transform changes. FOV affects projected size reporting; the physical quad remains in world units. Sampling uses nearest views, with no crossfade, parallax correction, or depth reconstruction. Orthographic capture is intended for distant objects.
+
+For a fixed horizontal capture, bake a root with `PanShotCount = 1`, `TiltShotCount = 1`, and `TiltOffset = 90` (the default tilt range has midpoint zero). Pass its generated layout to `register`, or use `Util.layoutFromAttributes(root)` when the root still has the original bake settings. The selected top-down plane stays aligned to the model even as the camera orbits. `tiltOffset` defaults to zero for older layouts and is added after sampling `tiltConstraints`.
+
+Use `Lighting.LightingStyle = Enum.LightingStyle.Realistic` and `PrioritizeLightingQuality = true` for the demo's PBR comparisons. Soft lighting can shade a normal-mapped plane differently from equivalent geometry. The package leaves the experience's Lighting settings to its owner. Texture resolution, native material roughness, shadows, and missing geometric depth can still produce differences from the original.

@@ -16,11 +16,8 @@ function Assets.root(): Folder
 	return root
 end
 
-function Assets.layout(): Package.Layout
-	local root = Assets.root()
-	local resolution = root:GetAttribute("MaxResolutionPx")
-	assert(typeof(resolution) == "number", "missing embedded bake resolution")
-	return Package.Util.layout({ maxResolutionPx = resolution })
+function Assets.layout(entry: Entry): Package.Layout
+	return Package.Util.layoutFromAttributes(entry.folder)
 end
 
 function Assets.entry(name: string): Entry

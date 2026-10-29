@@ -8,6 +8,7 @@ export type LayoutInput = {
 	maxResolutionPx: number?,
 	paddingPx: number?,
 	tiltConstraints: NumberRange?,
+	tiltOffset: number?,
 }
 export type Layout = {
 	panShotCount: number,
@@ -15,6 +16,7 @@ export type Layout = {
 	maxResolutionPx: number,
 	paddingPx: number,
 	tiltConstraints: NumberRange,
+	tiltOffset: number,
 }
 export type Shot = {
 	index: number,
@@ -52,18 +54,45 @@ function Util.layout(input: LayoutInput?): Layout
 		maxResolutionPx = options.maxResolutionPx or 252,
 		paddingPx = if options.paddingPx == nil then 2 else options.paddingPx,
 		tiltConstraints = options.tiltConstraints or NumberRange.new(-180, 180),
+		tiltOffset = options.tiltOffset or 0,
 	}
 	integer(result.panShotCount, 1, 256, "panShotCount")
 	integer(result.tiltShotCount, 1, 256, "tiltShotCount")
 	assert(result.panShotCount * result.tiltShotCount <= 4096, "at most 4096 shots are supported")
 	integer(result.maxResolutionPx, 1, 4096, "maxResolutionPx")
 	integer(result.paddingPx, 0, 64, "paddingPx")
+	assert(finite(result.tiltOffset) and math.abs(result.tiltOffset) <= 180, "tiltOffset must be in -180..180 degrees")
 	local range = result.tiltConstraints
 	assert(
 		finite(range.Min) and finite(range.Max) and range.Min >= -180 and range.Max <= 180 and range.Min <= range.Max,
 		"invalid tiltConstraints"
 	)
 	return table.freeze(result)
+end
+
+-- Read the same root attributes as the baker. Use the generated layout if the
+-- source attributes have changed since baking or the images were resized.
+function Util.layoutFromAttributes(root: Instance): Layout
+	local input: LayoutInput = {}
+	local values: { [string]: number } = {}
+	for _, name in { "PanShotCount", "TiltShotCount", "MaxResolutionPx", "PaddingPx", "TiltOffset" } do
+		local value = root:GetAttribute(name)
+		if value ~= nil then
+			assert(typeof(value) == "number", `{name} must be a number`)
+			values[name] = value
+		end
+	end
+	input.panShotCount = values.PanShotCount
+	input.tiltShotCount = values.TiltShotCount
+	input.maxResolutionPx = values.MaxResolutionPx
+	input.paddingPx = values.PaddingPx
+	input.tiltOffset = values.TiltOffset
+	local range = root:GetAttribute("TiltConstraints")
+	if range ~= nil then
+		assert(typeof(range) == "NumberRange", "TiltConstraints must be a NumberRange")
+		input.tiltConstraints = range
+	end
+	return Util.layout(input)
 end
 
 function Util.tileSize(layout: Layout): number
@@ -101,9 +130,11 @@ function Util.shots(layout: Layout): { Shot }
 		local tilt = math.floor(index / layout.panShotCount)
 		local range = layout.tiltConstraints
 		local yaw = 360 * pan / layout.panShotCount
-		local pitch = if layout.tiltShotCount == 1
-			then (range.Min + range.Max) / 2
-			else range.Min + (range.Max - range.Min) * tilt / (layout.tiltShotCount - 1)
+		local pitch = (
+			if layout.tiltShotCount == 1
+				then (range.Min + range.Max) / 2
+				else range.Min + (range.Max - range.Min) * tilt / (layout.tiltShotCount - 1)
+		) + layout.tiltOffset
 		local right, up, toward = Util.basis(yaw, pitch)
 		table.insert(
 			shots,
@@ -162,36 +193,11 @@ function Util.solve(
 	assert(finite(distance), "camera and bounding box positions must be finite")
 	local localToward = boundingBoxCFrame:VectorToObjectSpace(toward)
 	local shot = Util.selectShot(localToward, preparedShots or Util.shots(layout))
-	local right: Vector3
-	local up: Vector3
-	if layout.tiltShotCount == 1 or layout.tiltConstraints.Min == layout.tiltConstraints.Max then
-		-- A single capture elevation cannot represent camera pitch. Only turn
-		-- around the model's local up axis, retaining that fixed bake elevation.
-		local horizontal = Vector3.new(localToward.X, 0, localToward.Z)
-		if horizontal.Magnitude < 1e-6 then
-			horizontal = Vector3.new(shot.toward.X, 0, shot.toward.Z)
-		end
-		local yaw = if horizontal.Magnitude > 1e-6 then math.deg(math.atan2(horizontal.X, horizontal.Z)) else 0
-		if math.cos(math.rad(shot.pitchDegrees)) < 0 then
-			yaw += 180
-		end
-		local localRight, localUp, normal = Util.basis(yaw, shot.pitchDegrees)
-		right = boundingBoxCFrame:VectorToWorldSpace(localRight)
-		up = boundingBoxCFrame:VectorToWorldSpace(localUp)
-		toward = boundingBoxCFrame:VectorToWorldSpace(normal)
-	else
-		local shotRight = boundingBoxCFrame:VectorToWorldSpace(shot.right)
-		right = shotRight - toward * toward:Dot(shotRight)
-		if right.Magnitude < 1e-6 then
-			right = cameraCFrame.RightVector - toward * toward:Dot(cameraCFrame.RightVector)
-		end
-		if right.Magnitude < 1e-6 then
-			local axis = if math.abs(toward.Y) < 0.99 then Vector3.yAxis else Vector3.xAxis
-			right = axis:Cross(toward)
-		end
-		right = right.Unit
-		up = toward:Cross(right).Unit
-	end
+	-- Geometry and tangent-space normals share the exact capture orientation.
+	-- Turning the plane between shots would rotate the baked surface lighting.
+	local right = boundingBoxCFrame:VectorToWorldSpace(shot.right)
+	local up = boundingBoxCFrame:VectorToWorldSpace(shot.up)
+	toward = boundingBoxCFrame:VectorToWorldSpace(shot.toward)
 	local atlasSize = Util.atlasSize(layout)
 	local start = shot.position + Vector2.one * layout.paddingPx
 	local size = boundingBoxSize.Magnitude

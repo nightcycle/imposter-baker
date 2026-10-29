@@ -9,7 +9,7 @@ imposter-baker "path/to/model.rbxm" "path/to/output/directory"
 
 The `.png` extension selects spritesheet output (case insensitive). Other paths select individual images. Existing generated files require `--overwrite`; unrelated files in an output directory are preserved.
 
-Try the package in Studio: download [`demo.rbxl`](test/demo/demo.rbxl), open it, and press **Play**. Spawn and explore with the standard Roblox controls. It compares the four original models with 52 imposters sharing one mesh and five texture maps. Baked pixels are embedded, so no spritesheet uploads or replacement asset IDs are needed. See the [demo rebuild guide](demo/README.md). Releases also include the place file.
+Try the package in Studio: download [`demo.rbxl`](test/demo/demo.rbxl), open it, and press **Play**. Spawn and explore with the standard Roblox controls. It compares the four original models with 4,100 imposters sharing one mesh and five texture maps on a 768-stud baseplate. Baked pixels are embedded, so no spritesheet uploads or replacement asset IDs are needed. See the [demo rebuild guide](demo/README.md). Releases also include the place file.
 
 ## Build and install
 
@@ -41,10 +41,24 @@ Export exactly one root Model, Folder, or BasePart. Place attributes on that roo
 | `MaxResolutionPx` | integer number | 252 | 1–4096 |
 | `PaddingPx` | integer number | 2 | 0–64 |
 | `TiltConstraints` | NumberRange, degrees | `NumberRange.new(-180, 180)` | ordered within −180…180 |
+| `TiltOffset` | number, degrees | 0 | finite within −180…180; added after sampling the tilt range |
+| `AmbientOcclusionStrength` | number | 0.75 | 0…1; cavity shading mixed into the runtime color map |
+| `AmbientOcclusionRadiusRatio` | number | 0.08 | 0…0.5; sampling radius as a fraction of bounds diagonal |
 
 At most 4096 shots are accepted. Raster memory estimates are checked before allocating output images. The default 512 MiB budget is deliberately conservative and includes a reserve for depth overlap; use `--max-memory-mib` to increase it. Asset decoding has separate per-asset limits.
 
-Pan zero views the model from bounding-box local +Z. Positive pan moves toward +X. Pan samples exclude the repeated 360° endpoint. Tilt samples include both range endpoints; one tilt uses the midpoint. The default therefore gives eight level views. For views above/below an upright object, a range such as `NumberRange.new(-60, 60)` is often more useful. The full −180…180 range intentionally includes inverted views and duplicate directions.
+Pan zero views the model from bounding-box local +Z. Positive pan moves toward +X. Pan samples exclude the repeated 360° endpoint. Tilt samples include both range endpoints; one tilt uses the midpoint. `TiltOffset` is added to every sampled pitch without clamping, so angles beyond ±180° wrap naturally. The default therefore gives eight level views. For views above/below an upright object, a range such as `NumberRange.new(-60, 60)` is often more useful. The full −180…180 range intentionally includes inverted views and duplicate directions.
+
+For a fixed top-down lilypad, set these attributes on the exported root, then rebake:
+
+```lua
+model:SetAttribute("PanShotCount", 1)
+model:SetAttribute("TiltShotCount", 1)
+model:SetAttribute("TiltConstraints", NumberRange.new(0, 0))
+model:SetAttribute("TiltOffset", 90)
+```
+
+The default tilt range also works with one tilt because its midpoint is zero. `+90` views from the model's local +Y; `-90` views from below. The runtime uses the exact capture orientation, so this one-shot image stays horizontal and does not spin with the camera. The generated JSON and Luau layouts carry `tiltOffset`; `Util.layoutFromAttributes(model)` reads the same attributes when using the original bake dimensions.
 
 Shots use zero-based keys `shot_0000`, `shot_0001`, etc. Pan varies fastest: `index = tiltIndex * PanShotCount + panIndex`. Atlas columns are `ceil(sqrt(shotCount))`, rows are `ceil(shotCount / columns)`, and frames fill rows from the top left.
 
@@ -56,7 +70,9 @@ For `tree.png`, output includes:
 
 | File | Meaning |
 | --- | --- |
-| `tree.png` | unlit sRGB color with straight alpha |
+| `tree.png` | sRGB color with cavity shading and straight alpha |
+| `tree.albedo.png` | raw sRGB albedo, without cavity shading |
+| `tree.occlusion.png` | linear capture-space ambient visibility; white means unoccluded |
 | `tree.normal.png` | linear OpenGL tangent-space normals for the imposter quad |
 | `tree.roughness.png` | linear grayscale roughness |
 | `tree.metalness.png` | linear grayscale metalness |
@@ -69,6 +85,10 @@ For `tree.png`, output includes:
 Directory output groups each snapshot's layers under its shot key: `shot_0000/color.png`, `shot_0000/normal.png`, `shot_0000/roughness.png`, etc. The output root also contains `imposter.json` and `imposter.luau`. Manifest image paths are relative to that root. All layers use identical dimensions and placement. RGB is dilated into transparent borders without increasing opacity. Four subpixel samples, linear color compositing, bilinear texture sampling, depth ordering, and transparent cutouts are enabled by default; `--samples 1` is faster.
 
 Normals encode +R toward quad right, +G toward quad up, +B toward the capture camera. Source tangent normal maps are transformed into this frame. Roughness defaults to 0.6; metalness defaults to 0 except for basic metal material enums. Those defaults are approximations when no source map exists. Emissive strength and tint are retained per source surface in `emissiveSurfaces`; masks remain unmodified. Runtime emission strength and tint are shared per batch, so group objects with compatible emission settings.
+
+Legacy TextureID samples, vertex colors, and part tint are multiplied in linear space and encoded to sRGB for SurfaceAppearance export. Source SurfaceAppearance color maps retain their sRGB interpretation. This conversion keeps native texture midtones from becoming darker when moved into PBR maps.
+
+Cavity shading samples the floating-point capture depth and normals before PNG quantization. It adds local contrast around recesses and overlapping surfaces without baking a light direction. Transparent background pixels do not occlude silhouettes. The runtime `color` map combines albedo and this shading because SurfaceAppearance has no separate occlusion input. Set `AmbientOcclusionStrength = 0` to use raw color, or composite the exported `albedo` and `occlusion` maps yourself. This capture-space approximation cannot see hidden geometry or reproduce cast shadows.
 
 ## Asset resolution
 

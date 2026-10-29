@@ -2,16 +2,16 @@
 use anyhow::{Context, Result, ensure};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use glam::Vec3;
-use image::{RgbaImage, imageops};
+use image::{Rgba, Rgba32FImage, RgbaImage, imageops};
 use imposter_baker::{config::Settings, scene};
 use rbx_dom_weak::{
     InstanceBuilder, WeakDom,
-    types::{Attributes, CFrame, Color3, Enum, Matrix3, Ref, UDim, UDim2, Vector3},
+    types::{Attributes, CFrame, Color3, Enum, Matrix3, NumberRange, Ref, UDim, UDim2, Vector3},
 };
 use serde::Deserialize;
 use std::{collections::BTreeMap, fs, path::Path};
 
-const RESOLUTION: u32 = 80;
+const RESOLUTION: u32 = 164;
 const PADDING: u32 = 2;
 const MAPS: [&str; 5] = ["color", "normal", "roughness", "metalness", "emissive"];
 
@@ -41,7 +41,86 @@ fn frame(position: Vec3, rotation: glam::Mat3) -> CFrame {
     )
 }
 
-fn compact(source: &RgbaImage, manifest: &Manifest) -> Result<RgbaImage> {
+fn resize_capture(source: &RgbaImage, resolution: u32, layer: &str) -> RgbaImage {
+    // Filter covered samples, not the black RGB of transparent texels. Color
+    // uses linear light; normal vectors need normalization after filtering.
+    let weighted = Rgba32FImage::from_fn(source.width(), source.height(), |x, y| {
+        let p = source.get_pixel(x, y).0.map(|v| v as f32 / 255.0);
+        let mut rgb = Vec3::new(p[0], p[1], p[2]);
+        if layer == "color" {
+            rgb = rgb
+                .to_array()
+                .map(|v| {
+                    if v <= 0.04045 {
+                        v / 12.92
+                    } else {
+                        ((v + 0.055) / 1.055).powf(2.4)
+                    }
+                })
+                .into();
+        }
+        Rgba([rgb.x * p[3], rgb.y * p[3], rgb.z * p[3], p[3]])
+    });
+    let filtered = imageops::resize(
+        &weighted,
+        resolution,
+        resolution,
+        imageops::FilterType::Triangle,
+    );
+    let mut result = RgbaImage::from_fn(resolution, resolution, |x, y| {
+        let p = filtered.get_pixel(x, y).0;
+        let alpha = p[3].clamp(0.0, 1.0);
+        if alpha < 1.0 / 255.0 {
+            return Rgba([0; 4]);
+        }
+        let mut rgb = Vec3::new(p[0], p[1], p[2]) / p[3];
+        if layer == "color" {
+            rgb = rgb
+                .to_array()
+                .map(|v| {
+                    if v <= 0.0031308 {
+                        v * 12.92
+                    } else {
+                        1.055 * v.powf(1.0 / 2.4) - 0.055
+                    }
+                })
+                .into();
+        } else if layer == "normal" {
+            rgb = ((rgb * 2.0 - Vec3::ONE).normalize_or(Vec3::Z) + Vec3::ONE) * 0.5;
+        }
+        Rgba([rgb.x, rgb.y, rgb.z, alpha].map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8))
+    });
+    let mut filled: Vec<bool> = result.pixels().map(|p| p[3] > 0).collect();
+    for _ in 0..PADDING {
+        let previous = result.clone();
+        let covered = filled.clone();
+        for y in 0..resolution {
+            for x in 0..resolution {
+                let index = (y * resolution + x) as usize;
+                if covered[index] {
+                    continue;
+                }
+                for (dx, dy) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
+                    let (sx, sy) = (x as i32 + dx, y as i32 + dy);
+                    if sx >= 0
+                        && sy >= 0
+                        && sx < resolution as i32
+                        && sy < resolution as i32
+                        && covered[(sy as u32 * resolution + sx as u32) as usize]
+                    {
+                        let p = previous.get_pixel(sx as u32, sy as u32);
+                        result.put_pixel(x, y, Rgba([p[0], p[1], p[2], 0]));
+                        filled[index] = true;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    result
+}
+
+fn compact(source: &RgbaImage, manifest: &Manifest, layer: &str) -> Result<RgbaImage> {
     let source_tile = manifest.settings.tile_size();
     ensure!(
         source.dimensions() == (manifest.columns * source_tile, manifest.rows * source_tile),
@@ -60,12 +139,7 @@ fn compact(source: &RgbaImage, manifest: &Manifest) -> Result<RgbaImage> {
             manifest.settings.max_resolution_px,
         )
         .to_image();
-        let image = imageops::resize(
-            &capture,
-            RESOLUTION,
-            RESOLUTION,
-            imageops::FilterType::Lanczos3,
-        );
+        let image = resize_capture(&capture, RESOLUTION, layer);
         for y in 0..tile {
             for x in 0..tile {
                 let sx = x.saturating_sub(PADDING).min(RESOLUTION - 1);
@@ -157,8 +231,8 @@ fn stage(dom: &mut WeakDom) -> Result<Ref> {
         workspace,
         part(
             "Baseplate",
-            Vec3::new(0.0, -0.5, 20.0),
-            Vec3::new(110.0, 1.0, 90.0),
+            Vec3::new(0.0, -0.5, 256.0),
+            Vec3::new(768.0, 1.0, 768.0),
             Color3::new(0.133, 0.161, 0.2),
         ),
     );
@@ -272,12 +346,7 @@ fn build(base: &Path, output: &Path) -> Result<()> {
     {
         let manifest: Manifest =
             serde_json::from_slice(&fs::read(format!("test/demo/{name}.imposter.json"))?)?;
-        ensure!(
-            manifest.settings.pan_shot_count == 8
-                && manifest.settings.tilt_shot_count == 1
-                && manifest.settings.tilt_constraints == [-180.0, 180.0],
-            "demo assumes eight level captures"
-        );
+        manifest.settings.validate()?;
         let bounds = Vec3::from_array(manifest.bounds_size);
         let scale = 10.0 / bounds.length();
         let folder = place.insert(
@@ -286,7 +355,20 @@ fn build(base: &Path, output: &Path) -> Result<()> {
                 .with_name(name)
                 .with_property(
                     "Attributes",
-                    Attributes::new().with("BoundsSize", vector(bounds * scale)),
+                    Attributes::new()
+                        .with("BoundsSize", vector(bounds * scale))
+                        .with("PanShotCount", manifest.settings.pan_shot_count as f64)
+                        .with("TiltShotCount", manifest.settings.tilt_shot_count as f64)
+                        .with("MaxResolutionPx", RESOLUTION as f64)
+                        .with("PaddingPx", PADDING as f64)
+                        .with("TiltOffset", manifest.settings.tilt_offset as f64)
+                        .with(
+                            "TiltConstraints",
+                            NumberRange::new(
+                                manifest.settings.tilt_constraints[0],
+                                manifest.settings.tilt_constraints[1],
+                            ),
+                        ),
                 ),
         );
         let template = place.insert(folder, InstanceBuilder::new("Model").with_name("Original"));
@@ -324,13 +406,13 @@ fn build(base: &Path, output: &Path) -> Result<()> {
         preview(&mut place, stage, template, index, name, bounds * scale);
         for map in MAPS {
             let path = Path::new("test/demo").join(&manifest.layers[map]);
-            let image = compact(&image::open(path)?.to_rgba8(), &manifest)?;
+            let image = compact(&image::open(path)?.to_rgba8(), &manifest, map)?;
             embed_image(&mut place, folder, map, &image)?;
         }
     }
     // The place remains readable in edit mode before its runtime scripts run.
     place.insert(storage,InstanceBuilder::new("ModuleScript").with_name("READ_ME")
-        .with_property("Source","--!strict\n-- IMPOSTER BAKER DEMO\n-- Press Play (F5), not Run. Walk and look around with normal Roblox controls.\n-- The front row compares original models with imposters; 48 more copies sit behind it.\n-- Texture pixels are embedded: no uploads, HTTP service, Wally install, or plugins are needed.\n-- Published experiences require Mesh / Image APIs enabled in their settings.\n-- Package source: ReplicatedStorage.ImposterRender\nreturn nil\n"));
+        .with_property("Source","--!strict\n-- IMPOSTER BAKER STRESS TEST\n-- Press Play (F5), not Run. Walk and look around with normal Roblox controls.\n-- 4,100 imposters share one mesh and five texture maps on a 768-stud baseplate.\n-- Change Rows/Columns/Spacing in ReplicatedStorage.Demo.Scene to scale the test.\n-- Lilypads use root attributes PanShotCount=1, TiltShotCount=1, TiltOffset=90.\n-- Texture pixels are embedded: no uploads, HTTP service, Wally install, or plugins are needed.\n-- Published experiences require Mesh / Image APIs enabled in their settings.\n-- Package source: ReplicatedStorage.ImposterRender\nreturn nil\n"));
     if let Some(parent) = output.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -377,14 +459,46 @@ mod tests {
             layers: BTreeMap::new(),
         };
         let image = RgbaImage::from_pixel(768, 768, Rgba([23, 45, 67, 255]));
-        let compact = compact(&image, &manifest).unwrap();
-        assert_eq!(compact.dimensions(), (252, 252));
+        let compact = compact(&image, &manifest, "color").unwrap();
+        assert_eq!(compact.dimensions(), (504, 504));
         for index in 0..8 {
-            let x = (index % 3) * 84;
-            let y = (index / 3) * 84;
+            let x = (index % 3) * 168;
+            let y = (index / 3) * 168;
             assert_eq!(compact.get_pixel(x, y).0, [23, 45, 67, 0]);
             assert_eq!(compact.get_pixel(x + 2, y + 2).0, [23, 45, 67, 255]);
         }
-        assert_eq!(compact.get_pixel(200, 200).0, [0, 0, 0, 0]);
+        assert_eq!(compact.get_pixel(450, 450).0, [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn downsampling_cutouts_keeps_albedo_and_unit_normals() {
+        let color = RgbaImage::from_fn(24, 24, |x, _| {
+            if x < 12 {
+                Rgba([160, 90, 30, 255])
+            } else {
+                Rgba([0; 4])
+            }
+        });
+        let normal = RgbaImage::from_fn(24, 24, |x, _| {
+            if x < 12 {
+                Rgba([204, 230, 128, 255])
+            } else {
+                Rgba([0; 4])
+            }
+        });
+        let color = resize_capture(&color, 7, "color");
+        let normal = resize_capture(&normal, 7, "normal");
+        let mut partial = false;
+        for (c, n) in color.pixels().zip(normal.pixels()) {
+            if c[3] == 0 {
+                continue;
+            }
+            partial |= c[3] < 255;
+            assert_eq!([c[0], c[1], c[2]], [160, 90, 30]);
+            let vector = Vec3::new(n[0] as f32, n[1] as f32, n[2] as f32) / 255.0 * 2.0 - Vec3::ONE;
+            assert!((vector.length() - 1.0).abs() < 0.01);
+            assert!(vector.dot(Vec3::new(0.6, 0.8, 0.0)) > 0.99);
+        }
+        assert!(partial, "test must exercise partially covered pixels");
     }
 }

@@ -1,14 +1,17 @@
 {
   "version": 1,
   "settings": {
-    "panShotCount": 8,
+    "panShotCount": 1,
     "tiltShotCount": 1,
     "maxResolutionPx": 252,
     "paddingPx": 2,
     "tiltConstraints": [
       -180.0,
       180.0
-    ]
+    ],
+    "tiltOffset": 90.0,
+    "ambientOcclusionStrength": 0.75,
+    "ambientOcclusionRadiusRatio": 0.08
   },
   "projection": "orthographic",
   "normalConvention": "OpenGL; +R=quad right, +G=quad up, +B=toward camera",
@@ -33,18 +36,20 @@
   ],
   "frameWorldSize": 11.651275,
   "tileSize": 256,
-  "columns": 3,
-  "rows": 3,
+  "columns": 1,
+  "rows": 1,
   "atlasSize": [
-    768,
-    768
+    256,
+    256
   ],
   "layers": {
+    "albedo": "lilypad.albedo.png",
     "color": "lilypad.png",
     "depth": "lilypad.depth.png",
     "emissive": "lilypad.emissive.png",
     "metalness": "lilypad.metalness.png",
     "normal": "lilypad.normal.png",
+    "occlusion": "lilypad.occlusion.png",
     "opacity": "lilypad.opacity.png",
     "roughness": "lilypad.roughness.png"
   },
@@ -53,101 +58,10 @@
       "key": "shot_0000",
       "index": 0,
       "yawDegrees": 0.0,
-      "pitchDegrees": 0.0,
+      "pitchDegrees": 90.0,
       "rect": [
         0,
         0,
-        256,
-        256
-      ],
-      "images": {}
-    },
-    {
-      "key": "shot_0001",
-      "index": 1,
-      "yawDegrees": 45.0,
-      "pitchDegrees": 0.0,
-      "rect": [
-        256,
-        0,
-        256,
-        256
-      ],
-      "images": {}
-    },
-    {
-      "key": "shot_0002",
-      "index": 2,
-      "yawDegrees": 90.0,
-      "pitchDegrees": 0.0,
-      "rect": [
-        512,
-        0,
-        256,
-        256
-      ],
-      "images": {}
-    },
-    {
-      "key": "shot_0003",
-      "index": 3,
-      "yawDegrees": 135.0,
-      "pitchDegrees": 0.0,
-      "rect": [
-        0,
-        256,
-        256,
-        256
-      ],
-      "images": {}
-    },
-    {
-      "key": "shot_0004",
-      "index": 4,
-      "yawDegrees": 180.0,
-      "pitchDegrees": 0.0,
-      "rect": [
-        256,
-        256,
-        256,
-        256
-      ],
-      "images": {}
-    },
-    {
-      "key": "shot_0005",
-      "index": 5,
-      "yawDegrees": 225.0,
-      "pitchDegrees": 0.0,
-      "rect": [
-        512,
-        256,
-        256,
-        256
-      ],
-      "images": {}
-    },
-    {
-      "key": "shot_0006",
-      "index": 6,
-      "yawDegrees": 270.0,
-      "pitchDegrees": 0.0,
-      "rect": [
-        0,
-        512,
-        256,
-        256
-      ],
-      "images": {}
-    },
-    {
-      "key": "shot_0007",
-      "index": 7,
-      "yawDegrees": 315.0,
-      "pitchDegrees": 0.0,
-      "rect": [
-        256,
-        512,
         256,
         256
       ],

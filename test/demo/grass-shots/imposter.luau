@@ -6,4 +6,5 @@ return table.freeze({
 	maxResolutionPx = 252,
 	paddingPx = 2,
 	tiltConstraints = NumberRange.new(-180, 180),
+	tiltOffset = 0,
 })

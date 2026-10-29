@@ -3,8 +3,9 @@ local AssetService = game:GetService("AssetService")
 local Util = require(script.Util)
 local Limits = require(script.Limits)
 local Atlas = require(script.Atlas)
+local Scheduler = require(script.Scheduler)
 
-local ImposterRender = { Util = Util, Limits = Limits, Atlas = Atlas }
+local ImposterRender = { Util = Util, Limits = Limits, Atlas = Atlas, Scheduler = Scheduler }
 
 export type Layout = Util.Layout
 export type LayoutInput = Util.LayoutInput
@@ -12,6 +13,8 @@ export type Shot = Util.Shot
 export type Solution = Util.Solution
 export type LimitOptions = Limits.Options
 export type Budget = Limits.Budget
+export type UpdateBudgetInput = Scheduler.BudgetInput
+export type UpdateBudget = Scheduler.Budget
 export type Layer = "color" | "normal" | "roughness" | "metalness" | "emissive"
 export type ImageContent = Content | string
 export type Source = ImageContent | { [string]: ImageContent }
@@ -29,6 +32,7 @@ export type Options = {
 	layers: { Layer }?,
 	emissiveStrength: number?,
 	emissiveTint: Color3?,
+	updateBudget: UpdateBudgetInput?,
 }
 export type Usage = {
 	models: number,
@@ -37,6 +41,10 @@ export type Usage = {
 	editableImages: number,
 	texturePixels: number,
 	reservedTransientPixels: number,
+	pendingInstances: number,
+	checkedInstances: number,
+	updatedInstances: number,
+	updateMilliseconds: number,
 }
 export type Handle = {
 	update: (self: Handle, boundingBoxCFrame: CFrame, boundingBoxSize: Vector3) -> (),
@@ -47,10 +55,12 @@ export type Renderer = {
 	part: MeshPart,
 	images: { [string]: EditableImage },
 	limits: Budget,
+	updateBudget: UpdateBudget,
 	register: (self: Renderer, id: string, sources: Sources, layout: LayoutInput?) -> (boolean, string?),
 	unregister: (self: Renderer, id: string) -> (boolean, string?),
 	add: (self: Renderer, id: string, boundingBoxCFrame: CFrame, boundingBoxSize: Vector3) -> (Handle?, string?),
-	update: (self: Renderer, cameraCFrame: CFrame, verticalFieldOfView: number) -> (),
+	update: (self: Renderer, cameraCFrame: CFrame, verticalFieldOfView: number, availableMilliseconds: number?) -> (),
+	setUpdateBudget: (self: Renderer, input: UpdateBudgetInput) -> (),
 	setLimits: (self: Renderer, options: LimitOptions) -> (boolean, string?),
 	getUsage: (self: Renderer) -> Usage,
 	destroy: (self: Renderer) -> (),
@@ -63,7 +73,7 @@ type ModelEntry = {
 	references: number,
 }
 type Quad = { vertices: { number }, uvs: { number }, normal: number }
-type InstanceEntry = { id: string, cframe: CFrame, size: Vector3, slot: number }
+type InstanceEntry = { id: string, cframe: CFrame, size: Vector3, slot: number, lastShot: number?, partRevision: number? }
 
 local DEFAULT_LAYERS: { Layer } = { "color", "normal", "roughness", "metalness", "emissive" }
 local MAP_NAMES: { [string]: string } = {
@@ -127,6 +137,7 @@ end
 function ImposterRender.new(options: Options?): (Renderer?, string?)
 	local o: Options = options or {}
 	local limits = Limits.resolve(o.limits)
+	local updateBudget = Scheduler.budget(o.updateBudget)
 	local layers: { Layer } = table.clone(o.layers or DEFAULT_LAYERS)
 	local selected: { [string]: boolean } = {}
 	for _, layer in layers do
@@ -221,6 +232,11 @@ function ImposterRender.new(options: Options?): (Renderer?, string?)
 	local busy = false
 	local activeSource: EditableImage? = nil
 	local renderer: Renderer
+	local lastPartCFrame: CFrame? = nil
+	local partRevision = 0
+	local scheduler = Scheduler.new(limits.maxInstances)
+	local lastStats: Scheduler.Stats = { checked = 0, updated = 0 }
+	local updateMilliseconds = 0
 
 	local function requireAlive()
 		assert(not destroyed, "renderer has been destroyed")
@@ -271,6 +287,7 @@ function ImposterRender.new(options: Options?): (Renderer?, string?)
 		part = sharedPart,
 		images = images,
 		limits = limits,
+		updateBudget = updateBudget,
 		register = function(
 			_self: Renderer,
 			id: string,
@@ -369,6 +386,7 @@ function ImposterRender.new(options: Options?): (Renderer?, string?)
 			end
 			local entry: InstanceEntry = { id = id, cframe = cframe, size = size, slot = slot }
 			instances[slot] = entry
+			Scheduler.set(scheduler, slot, cframe.Position)
 			model.references += 1
 			instanceCount += 1
 			local released = false
@@ -379,6 +397,8 @@ function ImposterRender.new(options: Options?): (Renderer?, string?)
 					validBounds(boxCFrame, boxSize)
 					entry.cframe = boxCFrame
 					entry.size = boxSize
+					entry.lastShot = nil
+					Scheduler.set(scheduler, slot, boxCFrame.Position)
 				end,
 				destroy = function(_handle: Handle)
 					if released or destroyed then
@@ -387,6 +407,7 @@ function ImposterRender.new(options: Options?): (Renderer?, string?)
 					released = true
 					hide(sharedMesh, quads[slot])
 					instances[slot] = nil
+					Scheduler.remove(scheduler, slot)
 					table.insert(free, slot)
 					model.references -= 1
 					instanceCount -= 1
@@ -394,32 +415,87 @@ function ImposterRender.new(options: Options?): (Renderer?, string?)
 			}
 			return handle, nil
 		end,
-		update = function(_self: Renderer, cameraCFrame: CFrame, verticalFieldOfView: number)
+		update = function(
+			_self: Renderer,
+			cameraCFrame: CFrame,
+			verticalFieldOfView: number,
+			availableMilliseconds: number?
+		)
+			local started = os.clock()
 			requireAlive()
-			for _, entry in instances do
-				local model = models[entry.id]
-				local solution =
-					Util.solve(cameraCFrame, verticalFieldOfView, entry.cframe, entry.size, model.layout, model.shots)
-				local quad = quads[entry.slot]
-				local half = solution.size / 2
-				local cf = sharedPart.CFrame:ToObjectSpace(solution.cframe)
-				local corners = {
-					Vector3.new(-half.X, half.Y, 0),
-					Vector3.new(half.X, half.Y, 0),
-					Vector3.new(half.X, -half.Y, 0),
-					Vector3.new(-half.X, -half.Y, 0),
-				}
-				local atlasSize = Vector2.one * allocator.size
-				local start = model.rect.position + solution.shot.position + Vector2.one * model.layout.paddingPx
-				local uvMin = start / atlasSize
-				local uvMax = (start + Vector2.one * model.layout.maxResolutionPx) / atlasSize
-				local uvs = { uvMin, Vector2.new(uvMax.X, uvMin.Y), uvMax, Vector2.new(uvMin.X, uvMax.Y) }
-				for i = 1, 4 do
-					sharedMesh:SetPosition(quad.vertices[i], cf:PointToWorldSpace(corners[i]))
-					sharedMesh:SetUV(quad.uvs[i], uvs[i])
-				end
-				sharedMesh:SetNormal(quad.normal, cf.ZVector)
+			local milliseconds = updateBudget.maxMilliseconds
+			if availableMilliseconds ~= nil then
+				assert(
+					availableMilliseconds >= 0 and availableMilliseconds < math.huge,
+					"availableMilliseconds must be nonnegative and finite"
+				)
+				milliseconds = math.min(milliseconds, availableMilliseconds)
 			end
+			assert(verticalFieldOfView > 0 and verticalFieldOfView < 180, "vertical FOV must be in (0, 180) degrees")
+			local cameraPosition = cameraCFrame.Position
+			assert(cameraPosition.Magnitude < math.huge, "camera position must be finite")
+			local partCFrame = sharedPart.CFrame
+			if partCFrame ~= lastPartCFrame then
+				partRevision += 1
+				Scheduler.invalidate(scheduler)
+				lastPartCFrame = partCFrame
+			end
+			lastStats = Scheduler.run(
+				scheduler,
+				cameraCFrame,
+				started + milliseconds / 1000,
+				function(slot: number): boolean
+					local entry = instances[slot]
+					if not entry then
+						return false
+					end
+					local model = models[entry.id]
+					local relative = cameraPosition - entry.cframe.Position
+					local toward = if relative.Magnitude > 1e-8 then relative else -cameraCFrame.LookVector
+					local shot = Util.selectShot(entry.cframe:VectorToObjectSpace(toward), model.shots)
+					-- Capture-locked geometry only changes at a shot boundary or when
+					-- its bounds/batch transform change. Avoid thousands of mesh writes.
+					if entry.lastShot == shot.index and entry.partRevision == partRevision then
+						return false
+					end
+					local solution = Util.solve(
+						cameraCFrame,
+						verticalFieldOfView,
+						entry.cframe,
+						entry.size,
+						model.layout,
+						model.shots
+					)
+					local quad = quads[entry.slot]
+					local half = solution.size / 2
+					local cf = partCFrame:ToObjectSpace(solution.cframe)
+					local corners = {
+						Vector3.new(-half.X, half.Y, 0),
+						Vector3.new(half.X, half.Y, 0),
+						Vector3.new(half.X, -half.Y, 0),
+						Vector3.new(-half.X, -half.Y, 0),
+					}
+					local atlasSize = Vector2.one * allocator.size
+					local start = model.rect.position + solution.shot.position + Vector2.one * model.layout.paddingPx
+					local uvMin = start / atlasSize
+					local uvMax = (start + Vector2.one * model.layout.maxResolutionPx) / atlasSize
+					local uvs = { uvMin, Vector2.new(uvMax.X, uvMin.Y), uvMax, Vector2.new(uvMin.X, uvMax.Y) }
+					for i = 1, 4 do
+						sharedMesh:SetPosition(quad.vertices[i], cf:PointToWorldSpace(corners[i]))
+						sharedMesh:SetUV(quad.uvs[i], uvs[i])
+					end
+					sharedMesh:SetNormal(quad.normal, cf.ZVector)
+					entry.lastShot = shot.index
+					entry.partRevision = partRevision
+					return true
+				end
+			)
+			updateMilliseconds = (os.clock() - started) * 1000
+		end,
+		setUpdateBudget = function(self: Renderer, input: UpdateBudgetInput)
+			requireAlive()
+			updateBudget = Scheduler.budget(input)
+			self.updateBudget = updateBudget
 		end,
 		setLimits = function(self: Renderer, input: LimitOptions): (boolean, string?)
 			requireAlive()
@@ -458,6 +534,10 @@ function ImposterRender.new(options: Options?): (Renderer?, string?)
 		end,
 		getUsage = function(_self: Renderer): Usage
 			return {
+				pendingInstances = if destroyed then 0 else Scheduler.pending(scheduler),
+				checkedInstances = lastStats.checked,
+				updatedInstances = lastStats.updated,
+				updateMilliseconds = updateMilliseconds,
 				models = modelCount,
 				instances = instanceCount,
 				editableMeshes = if destroyed then 0 else 1,
@@ -481,6 +561,7 @@ function ImposterRender.new(options: Options?): (Renderer?, string?)
 			-- An in-flight registration owns its transient source until it resumes.
 			table.clear(models)
 			table.clear(instances)
+			Scheduler.clear(scheduler)
 			modelCount = 0
 			instanceCount = 0
 		end,

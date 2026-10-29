@@ -53,8 +53,9 @@ fn run() -> Result<()> {
         },
     )?;
     println!(
-        "Baked {} shots with 7 layers to {}",
+        "Baked {} shots with {} layers to {}",
         manifest.shots.len(),
+        imposter_baker::render::LAYERS.len(),
         args.output.display()
     );
     Ok(())
