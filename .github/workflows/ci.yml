@@ -53,6 +53,22 @@ jobs:
       - run: cargo fmt --check
       - run: cargo test --locked --all-targets
       - run: cargo clippy --locked --all-targets -- -D warnings
+      - uses: CompeyDev/setup-rokit@v0.2.1
+        if: matrix.os == 'ubuntu-22.04'
+        with:
+          version: v1.2.0
+      - name: Build downloadable Studio demo
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          mkdir -p test/tooling
+          rojo build demo.project.json --output test/tooling/demo-base.rbxl
+          cargo run --locked --example build_demo -- test/tooling/demo-base.rbxl test/tooling/demo.rbxl
+      - uses: actions/upload-artifact@v4
+        if: matrix.os == 'ubuntu-22.04'
+        with:
+          name: demo-place
+          path: test/tooling/demo.rbxl
+          if-no-files-found: error
       - name: Bake demo fixtures (optional network integration)
         if: inputs.bake_demos && matrix.os == 'ubuntu-22.04'
         run: cargo test --locked --test baking demo_models -- --ignored
@@ -99,7 +115,9 @@ jobs:
       - run: curl --fail --location --retry 3 https://luau-lsp.pages.dev/type-definitions/globalTypes.None.d.luau --output test/tooling/roblox.d.luau
       - run: rojo sourcemap default.project.json --output test/tooling/sourcemap.json
       - run: luau-lsp analyze --definitions=@roblox=test/tooling/roblox.d.luau --sourcemap=test/tooling/sourcemap.json --platform=roblox imposter-render/src test/luau
-      - run: stylua --check imposter-render/src test/luau test/run.luau
+      - run: rojo sourcemap demo.project.json --output test/tooling/demo-sourcemap.json
+      - run: luau-lsp analyze --definitions=@roblox=test/tooling/roblox.d.luau --sourcemap=test/tooling/demo-sourcemap.json --platform=roblox demo/src
+      - run: stylua --check imposter-render/src test/luau test/run.luau demo/src
       - run: lune run test/run.luau
       - run: wally package --project-path imposter-render --output test/tooling/imposter-render.zip
       - run: rojo build imposter-render/default.project.json --output test/tooling/imposter-render.rbxm

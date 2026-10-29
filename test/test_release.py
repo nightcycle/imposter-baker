@@ -74,11 +74,12 @@ class ReleaseTests(unittest.TestCase):
             (directory / f"imposter-baker-0.1.0-{platform}.zip").write_bytes(b"zip")
         (directory / "imposter-render.zip").write_bytes(b"wally")
         (directory / "imposter-render.rbxm").write_bytes(b"model")
+        (directory / "demo.rbxl").write_bytes(b"place")
         result = release.checksums(directory, "v0.1.0")
         for line in result.read_text().splitlines():
             digest, name = line.split("  ")
             self.assertEqual(digest, hashlib.sha256((directory / name).read_bytes()).hexdigest())
-        self.assertEqual(len(result.read_text().splitlines()), 7)
+        self.assertEqual(len(result.read_text().splitlines()), 8)
         self.assertEqual(release.checksums(directory, "v0.1.0").read_bytes(), result.read_bytes())
 
     @patch.dict(os.environ, {"WALLY_AUTH_TOKEN": "test-token"})

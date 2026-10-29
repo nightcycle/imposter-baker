@@ -63,7 +63,7 @@ def checksums(directory: Path, tag: str) -> Path:
         raise ValueError("invalid release tag")
     version = tag[1:]
     expected = {f"imposter-baker-{version}-{p}.zip" for p in PLATFORMS}
-    expected.update(("imposter-render.zip", "imposter-render.rbxm"))
+    expected.update(("imposter-render.zip", "imposter-render.rbxm", "demo.rbxl"))
     actual = {p.name for p in directory.iterdir() if p.is_file() and p.name != "SHA256SUMS"}
     if actual != expected:
         raise ValueError(f"unexpected release assets: missing={sorted(expected - actual)}, extra={sorted(actual - expected)}")

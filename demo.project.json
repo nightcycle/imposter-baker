@@ -1,0 +1,30 @@
+{
+  "name": "Imposter Baker Demo",
+  "tree": {
+    "$className": "DataModel",
+    "Workspace": {
+      "$properties": {
+        "Gravity": 196.2,
+        "StreamingEnabled": false
+      }
+    },
+    "Lighting": {
+      "$properties": {
+        "ClockTime": 14,
+        "Brightness": 2,
+        "Ambient": [0.45, 0.48, 0.55],
+        "OutdoorAmbient": [0.55, 0.58, 0.65],
+        "GlobalShadows": true
+      }
+    },
+    "ReplicatedStorage": {
+      "ImposterRender": { "$path": "imposter-render/src" },
+      "Demo": { "$path": "demo/src/shared" }
+    },
+    "StarterPlayer": {
+      "StarterPlayerScripts": {
+        "DemoClient": { "$path": "demo/src/client.client.luau" }
+      }
+    }
+  }
+}

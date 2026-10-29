@@ -273,6 +273,36 @@ fn surface_maps_and_normals_use_uvs() {
 }
 
 #[test]
+fn legacy_texture_tint_matches_linear_multiplication_without_changing_surface_tints() {
+    let mut s = cube();
+    s.objects[0].material.color = Vec3::splat(0.5);
+    let untextured = render::render(&s, 0, 1).unwrap();
+    assert_eq!(untextured[0].get_pixel(14, 14).0, [128, 128, 128, 255]);
+    for (texture_value, expected) in [(255, 188), (128, 92)] {
+        s.objects[0].material.color_map = Some(scene::Texture(std::sync::Arc::new(
+            image::RgbaImage::from_pixel(
+                1,
+                1,
+                image::Rgba([texture_value, texture_value, texture_value, 255]),
+            ),
+        )));
+        let textured = render::render(&s, 0, 1).unwrap();
+        assert_eq!(
+            textured[0].get_pixel(14, 14).0,
+            [expected, expected, expected, 255]
+        );
+    }
+    let m = &mut s.objects[0].material;
+    m.surface = true;
+    m.surface_tint = Vec3::splat(0.5);
+    m.color_map = Some(scene::Texture(std::sync::Arc::new(
+        image::RgbaImage::from_pixel(1, 1, image::Rgba([255, 255, 255, 255])),
+    )));
+    let surface = render::render(&s, 0, 1).unwrap();
+    assert_eq!(surface[0].get_pixel(14, 14).0, [128, 128, 128, 255]);
+}
+
+#[test]
 fn malformed_mesh_fails_instead_of_producing_blank_images() {
     assert!(geometry::decode(b"not a mesh").is_err());
     let bad = Attributes::new().with("MaxResolutionPx", Variant::Bool(true));

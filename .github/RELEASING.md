@@ -11,7 +11,7 @@ Pull requests and branch pushes run `.github/workflows/ci.yml`. It can also be r
 
 Use **CI complete** as the required branch-protection status check. It fails if any prerequisite fails, is canceled, or is skipped. Branch protection itself must be configured in the repository settings.
 
-Successful CI uploads the checked Wally ZIP and runtime RBXM as the `checked-runtime` artifact. Manual CI runs can enable `bake_demos` to fetch public Roblox assets, verify all four model bakes, and upload `demo-bakes`. The default checks do not download model assets. The real EditableMesh/EditableImage integration test still runs in Studio; hosted runners do not provide Studio.
+Successful CI uploads the checked Wally ZIP and runtime RBXM as the `checked-runtime` artifact, plus the downloadable Studio demo as `demo-place`. Demo source is checked with strict Luau analysis. Manual CI runs can enable `bake_demos` to fetch public Roblox assets, verify all four model bakes, and upload `demo-bakes`. The default checks and place assembly use committed inputs and do not download model assets. The real EditableMesh/EditableImage integration test still runs in Studio; hosted runners do not provide Studio.
 
 Dependabot checks Cargo dependencies and GitHub Actions weekly and groups their update PRs. Dependency changes still pass through CI.
 
@@ -39,7 +39,7 @@ The tagged commit must contain the release workflows and scripts. You can also c
 
 Each ZIP contains the executable, license, and README at the archive root. Unix executable permissions are preserved. Filenames follow `imposter-baker-<version>-<platform>-<architecture>.zip` so Rokit can select the correct executable.
 
-The release also includes `imposter-render.zip`, `imposter-render.rbxm`, and `SHA256SUMS`. Checksums are generated only after all seven binary/package artifacts are present. The workflow first creates or resumes a draft, attaches every asset, then publishes it. Retrying can replace assets on an unfinished draft; already-published release assets are never replaced by this workflow.
+The release also includes `imposter-render.zip`, `imposter-render.rbxm`, `demo.rbxl`, and `SHA256SUMS`. The demo embeds the package and baked texture pixels and is ready for Studio Play mode. Checksums are generated only after all eight binary/package/demo artifacts are present. The workflow first creates or resumes a draft, attaches every asset, then publishes it. Retrying can replace assets on an unfinished draft; already-published release assets are never replaced by this workflow.
 
 Tags such as `v0.2.0-rc.1` publish GitHub prereleases and do not change the latest stable release. Set the same prerelease version in both manifests and the lockfile. Automatic Wally publication is limited to stable versions.
 

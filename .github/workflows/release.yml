@@ -105,9 +105,15 @@ jobs:
       - uses: CompeyDev/setup-rokit@v0.2.1
         with:
           version: v1.2.0
+      - uses: dtolnay/rust-toolchain@stable
       - run: mkdir -p dist
       - run: wally package --project-path imposter-render --output dist/imposter-render.zip
       - run: rojo build imposter-render/default.project.json --output dist/imposter-render.rbxm
+      - name: Build portable Studio demo with embedded textures
+        run: |
+          mkdir -p test/tooling
+          rojo build demo.project.json --output test/tooling/demo-base.rbxl
+          cargo run --locked --example build_demo -- test/tooling/demo-base.rbxl dist/demo.rbxl
       - uses: actions/upload-artifact@v4
         with:
           name: release-imposter-render

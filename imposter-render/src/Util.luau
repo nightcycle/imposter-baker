@@ -160,18 +160,38 @@ function Util.solve(
 	local distance = relative.Magnitude
 	local toward = if distance > 1e-8 then relative.Unit else -cameraCFrame.LookVector
 	assert(finite(distance), "camera and bounding box positions must be finite")
-	local shot = Util.selectShot(boundingBoxCFrame:VectorToObjectSpace(toward), preparedShots or Util.shots(layout))
-	local shotRight = boundingBoxCFrame:VectorToWorldSpace(shot.right)
-	local right = shotRight - toward * toward:Dot(shotRight)
-	if right.Magnitude < 1e-6 then
-		right = cameraCFrame.RightVector - toward * toward:Dot(cameraCFrame.RightVector)
+	local localToward = boundingBoxCFrame:VectorToObjectSpace(toward)
+	local shot = Util.selectShot(localToward, preparedShots or Util.shots(layout))
+	local right: Vector3
+	local up: Vector3
+	if layout.tiltShotCount == 1 or layout.tiltConstraints.Min == layout.tiltConstraints.Max then
+		-- A single capture elevation cannot represent camera pitch. Only turn
+		-- around the model's local up axis, retaining that fixed bake elevation.
+		local horizontal = Vector3.new(localToward.X, 0, localToward.Z)
+		if horizontal.Magnitude < 1e-6 then
+			horizontal = Vector3.new(shot.toward.X, 0, shot.toward.Z)
+		end
+		local yaw = if horizontal.Magnitude > 1e-6 then math.deg(math.atan2(horizontal.X, horizontal.Z)) else 0
+		if math.cos(math.rad(shot.pitchDegrees)) < 0 then
+			yaw += 180
+		end
+		local localRight, localUp, normal = Util.basis(yaw, shot.pitchDegrees)
+		right = boundingBoxCFrame:VectorToWorldSpace(localRight)
+		up = boundingBoxCFrame:VectorToWorldSpace(localUp)
+		toward = boundingBoxCFrame:VectorToWorldSpace(normal)
+	else
+		local shotRight = boundingBoxCFrame:VectorToWorldSpace(shot.right)
+		right = shotRight - toward * toward:Dot(shotRight)
+		if right.Magnitude < 1e-6 then
+			right = cameraCFrame.RightVector - toward * toward:Dot(cameraCFrame.RightVector)
+		end
+		if right.Magnitude < 1e-6 then
+			local axis = if math.abs(toward.Y) < 0.99 then Vector3.yAxis else Vector3.xAxis
+			right = axis:Cross(toward)
+		end
+		right = right.Unit
+		up = toward:Cross(right).Unit
 	end
-	if right.Magnitude < 1e-6 then
-		local axis = if math.abs(toward.Y) < 0.99 then Vector3.yAxis else Vector3.xAxis
-		right = axis:Cross(toward)
-	end
-	right = right.Unit
-	local up = toward:Cross(right).Unit
 	local atlasSize = Util.atlasSize(layout)
 	local start = shot.position + Vector2.one * layout.paddingPx
 	local size = boundingBoxSize.Magnitude

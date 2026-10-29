@@ -214,8 +214,16 @@ pub fn render(scene: &Scene, index: u32, samples: u32) -> Result<Frame> {
                     let depth = (0.5 - hit.depth / side).clamp(0.0, 1.0);
                     let emissive =
                         Vec3::splat(m.emissive_map.as_ref().map_or(0.0, |t| t.sample(uv).x));
+                    // Legacy TextureID rendering multiplies the decoded texture
+                    // by MeshPart.Color in linear space. Baking that tint into
+                    // sRGB texels directly makes the SurfaceAppearance too dark.
+                    let linear_color = if !m.surface && m.color_map.is_some() {
+                        srgb_to_linear(tex.truncate() * vc.truncate()) * m.color
+                    } else {
+                        srgb_to_linear(c)
+                    };
                     let values = [
-                        srgb_to_linear(c),
+                        linear_color,
                         encoded,
                         Vec3::splat(rough),
                         Vec3::splat(metal),

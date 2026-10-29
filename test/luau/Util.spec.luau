@@ -31,6 +31,25 @@ return function()
 	assert(solved.uvMin == Vector2.one * (2 / 768))
 	local narrow = Util.solve(camera, 40, cf, size, layout, shots)
 	assert(narrow.projectedHeight > solved.projectedHeight)
+	-- Level-only bakes stay upright even when viewed above, below, or at a pole.
+	for _, position in { Vector3.new(40, 100, 20), Vector3.new(-30, -100, 10), Vector3.new(0, 100, 0) } do
+		local elevatedCamera = cf * CFrame.new(position) * CFrame.Angles(0, 0, 0.8)
+		local upright = Util.solve(elevatedCamera, 70, cf, size, layout, shots)
+		assert((upright.cframe.UpVector - cf.UpVector).Magnitude < 1e-5)
+		assert(math.abs(upright.cframe.ZVector:Dot(cf.UpVector)) < 1e-5)
+		assert((upright.cframe.RightVector:Cross(upright.cframe.UpVector) - upright.cframe.ZVector).Magnitude < 1e-5)
+	end
+	local repeatedLevel = Util.layout({ tiltShotCount = 3, tiltConstraints = NumberRange.new(0, 0) })
+	local elevatedCamera = cf * CFrame.new(20, 80, 30)
+	local upright = Util.solve(elevatedCamera, 70, cf, size, repeatedLevel)
+	assert((upright.cframe.UpVector - cf.UpVector).Magnitude < 1e-5)
+	local fixedPitch = Util.layout({ tiltShotCount = 1, tiltConstraints = NumberRange.new(20, 40) })
+	for _, height in { -80, 80 } do
+		local fixed = Util.solve(cf * CFrame.new(20, height, 30), 70, cf, size, fixedPitch)
+		assert(math.abs(fixed.cframe.ZVector:Dot(cf.UpVector) - 0.5) < 1e-5)
+	end
+	local tilted = Util.solve(elevatedCamera, 70, cf, size, Util.layout({ tiltShotCount = 3 }))
+	assert((tilted.cframe.ZVector - (elevatedCamera.Position - cf.Position).Unit).Magnitude < 1e-5)
 	assert(not pcall(Util.layout, { panShotCount = 0 }))
 	assert(not pcall(Util.layout, { paddingPx = -1 }))
 	assert(not pcall(Util.solve, camera, 180, cf, size, layout))

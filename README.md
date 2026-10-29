@@ -9,6 +9,8 @@ imposter-baker "path/to/model.rbxm" "path/to/output/directory"
 
 The `.png` extension selects spritesheet output (case insensitive). Other paths select individual images. Existing generated files require `--overwrite`; unrelated files in an output directory are preserved.
 
+Try the package in Studio: download [`demo.rbxl`](test/demo/demo.rbxl), open it, and press **Play**. Spawn and explore with the standard Roblox controls. It compares the four original models with 52 imposters sharing one mesh and five texture maps. Baked pixels are embedded, so no spritesheet uploads or replacement asset IDs are needed. See the [demo rebuild guide](demo/README.md). Releases also include the place file.
+
 ## Build and install
 
 Requires Rust 1.90+ and a native C/C++ toolchain for dependency builds.
