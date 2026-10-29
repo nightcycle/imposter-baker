@@ -1,6 +1,7 @@
 --!strict
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
 local Package = require(ReplicatedStorage.ImposterRender)
 local Assets = require(ReplicatedStorage.Demo.Assets)
 local Scene = require(ReplicatedStorage.Demo.Scene)
@@ -20,10 +21,24 @@ RunService:BindToRenderStep(binding, Enum.RenderPriority.Camera.Value + 1, funct
 	local camera = workspace.CurrentCamera
 	local active = batch
 	if camera and active and ready then
+		local motion: Package.Motion? = nil
+		local character = Players.LocalPlayer.Character
+		local root = if character then character:FindFirstChild("HumanoidRootPart") else nil
+		local humanoid = if character then character:FindFirstChildOfClass("Humanoid") else nil
+		if root and root:IsA("BasePart") then
+			local velocity = root.AssemblyLinearVelocity
+			-- Intent reacts immediately to turns and still predicts forward when
+			-- contact with an existing collider temporarily reduces velocity.
+			if humanoid and humanoid.MoveDirection.Magnitude > 0.01 then
+				local speed = math.max(humanoid.WalkSpeed, Vector3.new(velocity.X, 0, velocity.Z).Magnitude)
+				velocity = humanoid.MoveDirection * speed + Vector3.new(0, velocity.Y, 0)
+			end
+			motion = { Position = root.Position, Velocity = velocity }
+		end
 		local available =
 			math.max(0, 1000 / Scene.TargetFps - (os.clock() - frameStarted) * 1000 - Scene.FrameReserveMilliseconds)
 		debug.profilebegin("Imposter updates")
-		active:Update(camera.CFrame, camera.FieldOfView, available)
+		active:Update(camera.CFrame, camera.FieldOfView, available, motion)
 		debug.profileend()
 	end
 end)
@@ -38,6 +53,9 @@ local success, message = pcall(function()
 			MaxRealInstances = Scene.MaxRealInstances,
 			MaxTransitionsPerFrame = 4,
 			MaxCreatesPerFrame = 1,
+			LookAheadSeconds = Scene.RealLookAheadSeconds,
+			MaxLookAheadDistance = Scene.RealMaxLookAheadDistance,
+			CameraLookAheadDistance = Scene.RealCameraLookAheadDistance,
 		},
 		InstanceCache = { MaxInstances = 128, MaxPartsPerInstance = 128, MaxPartsPerFlush = 256 },
 		Limits = {

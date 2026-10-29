@@ -13,6 +13,8 @@ return function()
 		Limits = { MaxTextureSize = 64, MaxInstances = 3 },
 		UpdateBudget = { TargetFps = 60, MaxMilliseconds = 16 },
 		Lod = {
+			LookAheadSeconds = 0,
+			CameraLookAheadDistance = 0,
 			NearDistance = 20,
 			FarDistance = 24,
 			ReplacementMargin = 2,
@@ -68,7 +70,14 @@ return function()
 	settle(CFrame.new(0, 0, -10))
 	assert(not b:GetRealInstance() and real.Parent == nil, "crossing the far Distance returns the clone to cache")
 	a:SetLodEnabled(true)
-	renderer:SetLodOptions({ NearDistance = 20, FarDistance = 24, MaxRealInstances = 2, MaxCreatesPerFrame = 0 })
+	renderer:SetLodOptions({
+		LookAheadSeconds = 0,
+		CameraLookAheadDistance = 0,
+		NearDistance = 20,
+		FarDistance = 24,
+		MaxRealInstances = 2,
+		MaxCreatesPerFrame = 0,
+	})
 	assert(renderer:Prewarm("cube", 2) == 2)
 	settle(CFrame.identity)
 	assert(a:GetRealInstance() and b:GetRealInstance() and renderer:GetUsage().RealInstances == 2)
@@ -98,7 +107,13 @@ return function()
 		Layers = layers,
 		Limits = { MaxTextureSize = 64, MaxInstances = 3 },
 		UpdateBudget = { TargetFps = 60, MaxMilliseconds = 16 },
-		Lod = { MaxRealInstances = 3, MaxTransitionsPerFrame = 2, MaxCreatesPerFrame = 1 },
+		Lod = {
+			LookAheadSeconds = 0,
+			CameraLookAheadDistance = 0,
+			MaxRealInstances = 3,
+			MaxTransitionsPerFrame = 2,
+			MaxCreatesPerFrame = 1,
+		},
 		InstanceCache = {
 			WorldRoot = world :: WorldRoot,
 			MaxInstances = 3,
@@ -128,6 +143,74 @@ return function()
 	cold:Update(CFrame.identity, 70)
 	assert(cold:GetUsage().RealInstances == 0)
 	cold:Destroy()
+	-- A 160-stud/s route must promote collision geometry ahead without waiting
+	-- for the initial visual pass over 4,096 distant instances to finish.
+	local predictiveOptions: Package.Options = {
+		Parent = world,
+		Layers = layers,
+		Limits = { MaxTextureSize = 64, MaxInstances = 4100, WorldExtent = 1024 },
+		UpdateBudget = { TargetFps = 240, MaxMilliseconds = 1 },
+		Lod = { NearDistance = 24, FarDistance = 32, MaxRealInstances = 4, MaxCreatesPerFrame = 0 },
+		InstanceCache = {
+			WorldRoot = world :: WorldRoot,
+			MaxInstances = 4,
+			MaxPartsPerInstance = 1,
+			MaxPartsPerFlush = 4,
+		},
+	}
+	local predictive, predictiveError = Package.New(predictiveOptions)
+	assert(predictive, predictiveError)
+	assert(
+		predictive:Register("cube", { Color = Content.fromObject(source) }, { PanShotCount = 2, MaxResolutionPx = 16 })
+	)
+	assert(predictive:RegisterTemplate("cube", template, { CanCollide = true }))
+	assert(predictive:Prewarm("cube", 4) == 4)
+	for index = 1, 4096 do
+		assert(predictive:Add("cube", CFrame.new(600, 0, 0), Vector3.one))
+		if index % 1000 == 0 then
+			task.wait()
+		end
+	end
+	local immediate = predictive:Add("cube", CFrame.new(-2, 0, 0), Vector3.one)
+	local behind = predictive:Add("cube", CFrame.new(-30, 0, 0), Vector3.one)
+	local ahead = predictive:Add("cube", CFrame.new(90, 0, 0), Vector3.one)
+	local farAhead = predictive:Add("cube", CFrame.new(120, 0, 0), Vector3.one)
+	assert(immediate and behind and ahead and farAhead)
+	for frame = 0, 7 do
+		local position = Vector3.new(frame * 160 / 240, 0, 0)
+		predictive:Update(
+			CFrame.new(position + Vector3.new(0, 5, 15)),
+			70,
+			nil,
+			{ Position = position, Velocity = Vector3.new(160, 0, 0) }
+		)
+		local usage = predictive:GetUsage()
+		assert(usage.LodTransitions <= 4 and usage.BulkMovedParts <= 4 and usage.CachedInstances == 4)
+	end
+	assert(
+		immediate:GetRealInstance() and ahead:GetRealInstance(),
+		"near and forward collision models must be ready within eight updates"
+	)
+	assert(not behind:GetRealInstance(), "behind the travel corridor must not outrank forward loading")
+	assert(predictive:GetUsage().PendingInstances > 0, "test must exercise an unfinished far-field pass")
+	local collider = (ahead:GetRealInstance() :: Model):FindFirstChildWhichIsA("BasePart", true) :: BasePart
+	assert(collider.CanCollide and collider.Position == Vector3.new(90, 0, 0))
+	for frame = 8, 135 do
+		local position = Vector3.new(frame * 160 / 240, 0, 0)
+		predictive:Update(CFrame.new(position), 70, nil, { Position = position, Velocity = Vector3.new(160, 0, 0) })
+		assert(ahead:GetRealInstance(), "the collider must stay present through the predicted impact")
+		if frame % 20 == 0 then
+			task.wait()
+		end
+	end
+	local beforePause = ahead:GetRealInstance()
+	predictive:Update(CFrame.identity, 70, 0, { Velocity = Vector3.new(-160, 0, 0) })
+	assert(ahead:GetRealInstance() == beforePause and predictive:GetUsage().LodTransitions == 0)
+	for _ = 1, 8 do
+		predictive:Update(CFrame.identity, 70, nil, { Velocity = Vector3.new(-160, 0, 0) })
+	end
+	assert(behind:GetRealInstance(), "reversing direction must refresh the priority corridor promptly")
+	predictive:Destroy()
 	template:Destroy()
 	source:Destroy()
 	world:Destroy()

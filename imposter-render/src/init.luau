@@ -20,6 +20,7 @@ export type UpdateBudgetInput = Scheduler.BudgetInput
 export type UpdateBudget = Scheduler.Budget
 export type LodOptions = Lod.Options
 export type LodConfig = Lod.Config
+export type Motion = Lod.Motion
 export type InstanceCacheOptions = InstanceCache.Options
 export type TemplateOptions = InstanceCache.TemplateOptions
 export type Layer = "color" | "normal" | "roughness" | "metalness" | "emissive"
@@ -75,7 +76,13 @@ export type Renderer = {
 	Register: (self: Renderer, id: string, sources: Sources, layout: LayoutInput?) -> (boolean, string?),
 	Unregister: (self: Renderer, id: string) -> (boolean, string?),
 	Add: (self: Renderer, id: string, boundingBoxCFrame: CFrame, boundingBoxSize: Vector3) -> (Handle?, string?),
-	Update: (self: Renderer, cameraCFrame: CFrame, verticalFieldOfView: number, availableMilliseconds: number?) -> (),
+	Update: (
+		self: Renderer,
+		cameraCFrame: CFrame,
+		verticalFieldOfView: number,
+		availableMilliseconds: number?,
+		motion: Motion?
+	) -> (),
 	SetUpdateBudget: (self: Renderer, input: UpdateBudgetInput) -> (),
 	SetLodOptions: (self: Renderer, input: LodOptions) -> (),
 	RegisterTemplate: (self: Renderer, id: string, template: Instance, options: TemplateOptions?) -> (boolean, string?),
@@ -267,6 +274,10 @@ function ImposterRender.New(options: Options?): (Renderer?, string?)
 	local lastPartCFrame: CFrame? = nil
 	local partRevision = 0
 	local scheduler = Scheduler.New(limits.MaxInstances)
+	local priorityQueue = Lod.NewQueue()
+	local lastFocusPosition: Vector3? = nil
+	local lastFocusTime = 0
+	local lastFocus: Lod.Focus? = nil
 	local lastStats: Scheduler.Stats = { Checked = 0, Updated = 0 }
 	local updateMilliseconds = 0
 	local cache: InstanceCache.Cache? = nil
@@ -528,6 +539,7 @@ function ImposterRender.New(options: Options?): (Renderer?, string?)
 				{ Id = id, CFrame = cframe, Size = size, Slot = slot, LodEnabled = true, RealDirty = false }
 			instances[slot] = entry
 			Scheduler.Set(scheduler, slot, cframe.Position)
+			Lod.Set(priorityQueue, slot, cframe.Position)
 			model.References += 1
 			instanceCount += 1
 			local released = false
@@ -541,11 +553,19 @@ function ImposterRender.New(options: Options?): (Renderer?, string?)
 					entry.LastShot = nil
 					entry.RealDirty = true
 					Scheduler.Set(scheduler, slot, boxCFrame.Position)
+					if entry.LodEnabled then
+						Lod.Set(priorityQueue, slot, boxCFrame.Position)
+					end
 				end,
 				SetLodEnabled = function(_handle: Handle, enabled: boolean)
 					requireAlive()
 					assert(not released, "handle has been destroyed")
 					entry.LodEnabled = enabled
+					if enabled then
+						Lod.Set(priorityQueue, slot, entry.CFrame.Position)
+					else
+						Lod.Remove(priorityQueue, slot)
+					end
 					Scheduler.Invalidate(scheduler)
 				end,
 				GetRealInstance = function(_handle: Handle): Model?
@@ -565,6 +585,7 @@ function ImposterRender.New(options: Options?): (Renderer?, string?)
 					hide(sharedMesh, quads[slot])
 					instances[slot] = nil
 					Scheduler.Remove(scheduler, slot)
+					Lod.Remove(priorityQueue, slot)
 					table.insert(free, slot)
 					model.References -= 1
 					instanceCount -= 1
@@ -576,7 +597,8 @@ function ImposterRender.New(options: Options?): (Renderer?, string?)
 			_self: Renderer,
 			cameraCFrame: CFrame,
 			verticalFieldOfView: number,
-			availableMilliseconds: number?
+			availableMilliseconds: number?,
+			motion: Motion?
 		)
 			local started = os.clock()
 			requireAlive()
@@ -591,6 +613,24 @@ function ImposterRender.New(options: Options?): (Renderer?, string?)
 			assert(verticalFieldOfView > 0 and verticalFieldOfView < 180, "vertical FOV must be in (0, 180) degrees")
 			local cameraPosition = cameraCFrame.Position
 			assert(cameraPosition.Magnitude < math.huge, "Camera Position must be finite")
+			local focusPosition = if motion and motion.Position then motion.Position else cameraPosition
+			local velocity = if motion then motion.Velocity else nil
+			if not velocity then
+				local elapsed = started - lastFocusTime
+				local delta = if lastFocusPosition then focusPosition - lastFocusPosition else Vector3.zero
+				velocity = if elapsed >= 0.001
+						and elapsed <= 0.25
+						and delta.Magnitude <= lod.MaxLookAheadDistance
+					then delta / elapsed
+					else Vector3.zero
+			end
+			lastFocusPosition, lastFocusTime = focusPosition, started
+			local focus = Lod.GetFocus(cameraCFrame, { Position = focusPosition, Velocity = velocity }, lod)
+			if lastFocus and (lastFocus.Position ~= focus.Position or lastFocus.Target ~= focus.Target) then
+				-- A character can move independently of a fixed or spectator camera.
+				Scheduler.Invalidate(scheduler)
+			end
+			lastFocus = focus
 			local partCFrame = sharedPart.CFrame
 			if partCFrame ~= lastPartCFrame then
 				partRevision += 1
@@ -606,7 +646,7 @@ function ImposterRender.New(options: Options?): (Renderer?, string?)
 				local result: InstanceEntry? = nil
 				local distance = -1
 				for active in realEntries do
-					local nextDistance = Lod.Distance(cameraPosition, active.CFrame.Position)
+					local nextDistance = Lod.PriorityDistance(focus, active.CFrame.Position)
 					if
 						nextDistance > distance or (nextDistance == distance and result and active.Slot > result.Slot)
 					then
@@ -629,100 +669,109 @@ function ImposterRender.New(options: Options?): (Renderer?, string?)
 			end
 			-- Reserve part of this same budget for the bounded, atomic bulk move.
 			local reserve = if pool then math.min(milliseconds * 0.25, math.max(0.05, flushMilliseconds * 1.2)) else 0
-			lastStats = Scheduler.Run(
-				scheduler,
-				cameraCFrame,
-				started + (milliseconds - reserve) / 1000,
-				function(slot: number): boolean
-					local entry = instances[slot]
-					if not entry then
-						return false
+			local function visit(slot: number): boolean
+				local entry = instances[slot]
+				if not entry then
+					return false
+				end
+				if pool then
+					if realCount > lod.MaxRealInstances then
+						if transitions < lod.MaxTransitionsPerFrame then
+							local victim = farthest()
+							if victim then
+								demote(victim)
+							end
+						else
+							retry = true
+						end
 					end
-					if pool then
-						if realCount > lod.MaxRealInstances then
+					local distance = Lod.PriorityDistance(focus, entry.CFrame.Position)
+					local scale = if models[entry.Id].HasTemplate then pool:ScaleFor(entry.Id, entry.Size) else nil
+					local eligible = entry.LodEnabled and scale ~= nil and lod.MaxRealInstances > 0
+					local real = entry.Real
+					if real then
+						if not eligible or distance > lod.FarDistance then
 							if transitions < lod.MaxTransitionsPerFrame then
-								local victim = farthest()
-								if victim then
-									demote(victim)
-								end
+								demote(entry)
+								return true
+							else
+								retry = true
+								return false
+							end
+						end
+						if entry.RealDirty then
+							local queued = pool:Queue(real, entry.CFrame, entry.Size)
+							if queued then
+								entry.RealDirty = false
 							else
 								retry = true
 							end
 						end
-						local distance = Lod.Distance(cameraPosition, entry.CFrame.Position)
-						local scale = if models[entry.Id].HasTemplate then pool:ScaleFor(entry.Id, entry.Size) else nil
-						local eligible = entry.LodEnabled and scale ~= nil and lod.MaxRealInstances > 0
-						local real = entry.Real
-						if real then
-							if not eligible or distance > lod.FarDistance then
-								if transitions < lod.MaxTransitionsPerFrame then
-									demote(entry)
-									return true
-								else
-									retry = true
-									return false
+						return false
+					elseif eligible and distance <= lod.NearDistance then
+						local victim: InstanceEntry? = nil
+						local allowed = true
+						if realCount >= lod.MaxRealInstances then
+							local far, farDistance = farthest()
+							victim = far
+							allowed = far ~= nil and Lod.ShouldReplace(distance, farDistance, lod)
+						end
+						if allowed then
+							local needed = if victim then 2 else 1
+							local canCreate = creates < lod.MaxCreatesPerFrame
+							local warm = pool:Available(entry.Id) > 0 or (victim ~= nil and victim.Id == entry.Id)
+							if
+								transitions + needed > lod.MaxTransitionsPerFrame
+								or (not warm and not canCreate)
+								or pool:GetUsage().QueuedParts + pool:PartCount(entry.Id) > pool.MaxPartsPerFlush
+							then
+								-- A cold pool with creation disabled needs an explicit
+								-- prewarm, not endless rescans of a stationary scene.
+								retry = retry or warm or lod.MaxCreatesPerFrame > 0
+							else
+								if victim then
+									demote(victim)
 								end
-							end
-							if entry.RealDirty then
-								local queued = pool:Queue(real, entry.CFrame, entry.Size)
-								if queued then
+								local lease, _, created = pool:Acquire(entry.Id, canCreate)
+								if lease then
+									if created then
+										creates += 1
+									end
+									local queued, queueError = pool:Queue(lease, entry.CFrame, entry.Size)
+									if not queued then
+										pool:Release(lease)
+										error(queueError)
+									end
+									entry.Real = lease
 									entry.RealDirty = false
+									realEntries[entry] = true
+									realCount += 1
+									transitions += 1
+									table.insert(promoted, entry)
 								else
 									retry = true
-								end
-							end
-							return false
-						elseif eligible and distance <= lod.NearDistance then
-							local victim: InstanceEntry? = nil
-							local allowed = true
-							if realCount >= lod.MaxRealInstances then
-								local far, farDistance = farthest()
-								victim = far
-								allowed = far ~= nil and Lod.ShouldReplace(distance, farDistance, lod)
-							end
-							if allowed then
-								local needed = if victim then 2 else 1
-								local canCreate = creates < lod.MaxCreatesPerFrame
-								local warm = pool:Available(entry.Id) > 0 or (victim ~= nil and victim.Id == entry.Id)
-								if
-									transitions + needed > lod.MaxTransitionsPerFrame
-									or (not warm and not canCreate)
-									or pool:GetUsage().QueuedParts + pool:PartCount(entry.Id)
-										> pool.MaxPartsPerFlush
-								then
-									-- A cold pool with creation disabled needs an explicit
-									-- prewarm, not endless rescans of a stationary scene.
-									retry = retry or warm or lod.MaxCreatesPerFrame > 0
-								else
-									if victim then
-										demote(victim)
-									end
-									local lease, _, created = pool:Acquire(entry.Id, canCreate)
-									if lease then
-										if created then
-											creates += 1
-										end
-										local queued, queueError = pool:Queue(lease, entry.CFrame, entry.Size)
-										if not queued then
-											pool:Release(lease)
-											error(queueError)
-										end
-										entry.Real = lease
-										entry.RealDirty = false
-										realEntries[entry] = true
-										realCount += 1
-										transitions += 1
-										table.insert(promoted, entry)
-									else
-										retry = true
-									end
 								end
 							end
 						end
 					end
-					return draw(entry, cameraCFrame, verticalFieldOfView)
 				end
-			)
+				return draw(entry, cameraCFrame, verticalFieldOfView)
+			end
+			local workDeadline = started + (milliseconds - reserve) / 1000
+			local priorityStats = { Checked = 0, Updated = 0 }
+			if pool and lod.MaxRealInstances > 0 then
+				priorityStats = Lod.RunQueue(
+					priorityQueue,
+					focus,
+					lod,
+					started + (milliseconds - reserve) * lod.PriorityBudgetFraction / 1000,
+					visit
+				)
+			end
+			lastStats = Scheduler.Run(scheduler, cameraCFrame, workDeadline, visit)
+			lastStats.Checked += priorityStats.Checked
+			lastStats.Updated += priorityStats.Updated
+
 			if pool then
 				local flushStarted = os.clock()
 				local ok, err = pool:Flush()
@@ -841,6 +890,7 @@ function ImposterRender.New(options: Options?): (Renderer?, string?)
 			table.clear(models)
 			table.clear(instances)
 			Scheduler.Clear(scheduler)
+			Lod.Clear(priorityQueue)
 			modelCount = 0
 			instanceCount = 0
 		end,

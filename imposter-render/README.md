@@ -123,14 +123,27 @@ batch:SetLodOptions({
     MaxTransitionsPerFrame = 4,
     MaxCreatesPerFrame = 1,
     ReplacementMargin = 4,
+    LookAheadSeconds = 0.75,
+    MaxLookAheadDistance = 192,
+    CameraLookAheadDistance = 24,
+    PriorityBudgetFraction = 0.65,
 })
--- The usual batch:Update(camera.CFrame, camera.FieldOfView, availableMs)
--- now performs both imposter updates and real-model swaps.
+-- Supply character movement separately from the rendering camera:
+batch:Update(camera.CFrame, camera.FieldOfView, availableMs, {
+    Position = characterRoot.Position,
+    Velocity = characterRoot.AssemblyLinearVelocity,
+})
 handle:SetLodEnabled(false) -- Keep a particular instance as an imposter.
 local real: Model? = handle:GetRealInstance() -- Borrowed cached wrapper; nil when using an imposter.
 ```
 
-`Options.Lod` accepts the same fields; the values above are defaults. Distances are measured from the camera to each model's bounds center. The nearest eligible candidates are considered first. When the real-instance cap is full, a candidate must be at least `ReplacementMargin` studs closer than the farthest active instance to replace it (the boundary itself retains the current instance). Active real models stay real until they cross `FarDistance`. This distance band and replacement margin prevent rapid oscillation. Set `MaxRealInstances = 0` to return all models to imposters over the configured frame budgets. `SetLodOptions` replaces the configuration, defaulting omitted fields.
+`Options.Lod` accepts the same fields; the values above are defaults. `Update` takes an optional fourth argument of type `Motion`, with `Position` and `Velocity` in world space. Use the character's position and velocity when its movement differs from the camera. For immediate response to turns, applications can supply movement intent multiplied by speed. Without these inputs, the renderer estimates camera velocity between updates; while stationary, it looks `CameraLookAheadDistance` studs along the camera's look direction. Large inferred teleports and long pauses reset velocity estimation.
+
+Real-model selection looks `LookAheadSeconds` into the travel direction, capped by `MaxLookAheadDistance`. At **160 studs/second**, the default predicts **120 studs ahead**. Candidates are ranked by distance to the travel segment plus 20% of their distance along it. This favors upcoming geometry while retaining very close objects around the current position. `NearDistance` and `FarDistance` apply to that priority distance; setting both lookahead options to zero restores ordinary distance selection. Rendering and shot selection always use the actual camera.
+
+A separate spatial queue finds candidates along this corridor without waiting for a full pass over distant imposters. It gets up to `PriorityBudgetFraction` of the shared update budget after reserving time for the bulk move. The fraction must be between 0 and 0.9, leaving time for visual updates. Significant movement or a turn discards stale priority work; the background visual pass continues without restarting. Queue construction, promotions, and mesh work all respect the same deadline and clone/transition limits. Prewarm collidable templates before movement; zero available headroom still defers all work.
+
+When the real-instance cap is full, a candidate must improve the priority distance by more than `ReplacementMargin` to replace the farthest active instance. Active real models stay real until they cross `FarDistance`. This distance band and replacement margin prevent rapid oscillation. Set `MaxRealInstances = 0` to return all models to imposters over the configured frame budgets. `SetLodOptions` replaces the configuration, defaulting omitted fields.
 
 Use `Options.InstanceCache` to bound pooled geometry separately from editable assets:
 
@@ -155,15 +168,15 @@ Template bounds default to `Model:GetBoundingBox()` or `BasePart.CFrame/Size`. F
 
 `UnregisterTemplate(id)` frees its idle pool and snapshot; it refuses while any real instance uses that template. Disable LOD on those handles (or set the real limit to zero) and update until they have demoted first. Destroying a handle returns its clone; unregistering an unused model also removes its template. Destroying the renderer disposes of active clones, idle clones, snapshots, and the cache Folder.
 
-For custom integrations, `ImposterRender.InstanceCache` exports a typed standalone cache with `New`, `Register`, `Prewarm`, `Acquire`, `Queue`, `Flush`, `Release`, `Unregister`, and `Destroy`. Queueing the same lease repeatedly keeps its latest transform; releasing it cancels pending placement. `Lod.Resolve`, `Lod.Distance`, and `Lod.ShouldReplace` expose the selection configuration and distance policy.
+For custom integrations, `ImposterRender.InstanceCache` exports a typed standalone cache with `New`, `Register`, `Prewarm`, `Acquire`, `Queue`, `Flush`, `Release`, `Unregister`, and `Destroy`. Queueing the same lease repeatedly keeps its latest transform; releasing it cancels pending placement. `Lod.Resolve`, `Lod.GetFocus`, `Lod.PriorityDistance`, `Lod.Distance`, and `Lod.ShouldReplace` expose the selection policy. `Lod.NewQueue`, `Set`, `Remove`, `Clear`, and `RunQueue` expose the bounded spatial queue.
 
 ## Frame scheduling
 
-Updates default to a 240 FPS target with one quarter of the frame interval (about 1.04 ms) available to the renderer. Configure `Options.UpdateBudget`, or change it with `batch:SetUpdateBudget({ TargetFps = 240, MaxMilliseconds = 1 })`. `batch:Update(cameraCFrame, verticalFov, availableMilliseconds)` optionally accepts the remaining CPU headroom for this frame; zero defers all work. The effective budget is the smaller of that headroom and the configured maximum.
+Updates default to a 240 FPS target with one quarter of the frame interval (about 1.04 ms) available to the renderer. Configure `Options.UpdateBudget`, or change it with `batch:SetUpdateBudget({ TargetFps = 240, MaxMilliseconds = 1 })`. `batch:Update(cameraCFrame, verticalFov, availableMilliseconds, motion)` optionally accepts the remaining CPU headroom for this frame; zero defers all work. The effective budget is the smaller of that headroom and the configured maximum.
 
-Distance-queue construction and mesh updates both share the deadline. Each pass snapshots the camera position, builds its queue incrementally, then processes the closest model centers first. Unfinished work resumes next frame. The pass finishes before distances are refreshed, preventing distant instances from starving during continuous camera motion. Each visited instance uses the current camera and latest model bounds to choose its shot, including continuously moving handles. Removed and reused handles invalidate stale queue entries. New instances may remain hidden until their first scheduled update.
+The real-model priority queue runs first within its budget share. The background visual queue then uses the remaining time. Each visual pass snapshots the camera position, builds its queue incrementally, then processes the closest model centers first. Unfinished work resumes next frame. The pass finishes before distances are refreshed, preventing distant instances from starving during continuous camera motion. Each visited instance uses the current camera and latest model bounds to choose its shot, including continuously moving handles. Removed and reused handles invalidate stale queue entries. New instances may remain hidden until their first scheduled update.
 
-`GetUsage()` exposes `PendingInstances` (remaining queue estimate), `CheckedInstances`, `UpdatedInstances`, and `UpdateMilliseconds` for profiling. The last three describe the most recent update call. Unchanged shots skip mesh writes. This is a cooperative CPU budget: one in-progress item can finish slightly past the deadline. It cannot guarantee total game FPS or account for GPU time; reserve time for the rest of your game's frame, and share the available budget when updating multiple batches. The demo caps this work at 1 ms and reserves another 1 ms after accounting for earlier render callbacks.
+`GetUsage()` exposes `PendingInstances` (remaining background queue estimate), `CheckedInstances`, `UpdatedInstances`, and `UpdateMilliseconds` for profiling. The last three describe the most recent update call, including work from both queues. Unchanged shots skip mesh writes. This is a cooperative CPU budget: one in-progress item can finish slightly past the deadline. It cannot guarantee total game FPS or account for GPU time; reserve time for the rest of your game's frame, and share the available budget when updating multiple batches. The demo caps this work at 1 ms and reserves another 1 ms after accounting for earlier render callbacks.
 
 ## Allocation limits
 
@@ -187,7 +200,7 @@ Texture dimensions, mesh capacity growth, and `WorldExtent` changes require a ne
 
 ## Utilities and types
 
-The header exports `Util`, `Atlas`, `Limits`, `Scheduler`, `Lod`, and `InstanceCache`, plus `Layout`, `LayoutInput`, `Shot`, `Solution`, `Layer`, `ImageContent`, `Source`, `Sources`, `Options`, `LimitOptions`, `Budget`, `UpdateBudgetInput`, `UpdateBudget`, `LodOptions`, `LodConfig`, `InstanceCacheOptions`, `TemplateOptions`, `Usage`, `Renderer`, and `Handle` types. `Scheduler` exposes the pure distance queue and budget validation for custom renderers and deterministic tests.
+The header exports `Util`, `Atlas`, `Limits`, `Scheduler`, `Lod`, and `InstanceCache`, plus `Layout`, `LayoutInput`, `Shot`, `Solution`, `Layer`, `ImageContent`, `Source`, `Sources`, `Options`, `LimitOptions`, `Budget`, `UpdateBudgetInput`, `UpdateBudget`, `LodOptions`, `LodConfig`, `Motion`, `InstanceCacheOptions`, `TemplateOptions`, `Usage`, `Renderer`, and `Handle` types. `Scheduler` exposes the pure distance queue and budget validation for custom renderers and deterministic tests.
 
 `Util` exports `Layout`, `LayoutFromAttributes`, `TileSize`, `Grid`, `AtlasSize`, `ShotKey`, `Basis`, `Shots`, `SelectShot`, and `Solve`. These functions require no editable assets. `Atlas` exports `New`, `Allocate`, and `Release` for custom packing integrations.
 

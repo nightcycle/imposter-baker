@@ -17,6 +17,9 @@ Scene.RealNearDistance = 48
 Scene.RealFarDistance = 64
 Scene.MaxRealInstances = 64
 Scene.RealPrewarmPerModel = 16
+Scene.RealLookAheadSeconds = 0.75
+Scene.RealMaxLookAheadDistance = 192
+Scene.RealCameraLookAheadDistance = 24
 
 export type Placement = { Name: string, CFrame: CFrame, Comparison: boolean }
 
