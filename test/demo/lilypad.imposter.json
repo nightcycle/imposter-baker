@@ -3,7 +3,7 @@
   "settings": {
     "panShotCount": 1,
     "tiltShotCount": 1,
-    "maxResolutionPx": 252,
+    "maxResolutionPx": 500,
     "paddingPx": 2,
     "tiltConstraints": [
       -180.0,
@@ -35,12 +35,12 @@
     6.8153687
   ],
   "frameWorldSize": 11.651275,
-  "tileSize": 256,
+  "tileSize": 504,
   "columns": 1,
   "rows": 1,
   "atlasSize": [
-    256,
-    256
+    504,
+    504
   ],
   "layers": {
     "albedo": "lilypad.albedo.png",
@@ -62,8 +62,8 @@
       "rect": [
         0,
         0,
-        256,
-        256
+        504,
+        504
       ],
       "images": {}
     }

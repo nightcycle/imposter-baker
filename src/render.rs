@@ -216,16 +216,9 @@ pub fn render(scene: &Scene, index: u32, samples: u32) -> Result<Frame> {
                     let depth = (0.5 - hit.depth / side).clamp(0.0, 1.0);
                     let emissive =
                         Vec3::splat(m.emissive_map.as_ref().map_or(0.0, |t| t.sample(uv).x));
-                    // Legacy TextureID samples and tint are multiplied as linear
-                    // values. SurfaceAppearance albedo is sRGB: decode only that
-                    // path, then encode the final legacy product for export.
-                    // Decoding legacy midtones first applies an extra gamma
-                    // conversion and makes the imposter darker than its source.
-                    let linear_color = if !m.surface && m.color_map.is_some() {
-                        tex.truncate() * vc.truncate() * m.color
-                    } else {
-                        srgb_to_linear(c)
-                    };
+                    // Color textures are sRGB, including legacy TextureID maps.
+                    // Decode for compositing, then encode once for PNG output.
+                    let linear_color = srgb_to_linear(c);
                     let values = [
                         linear_color,
                         encoded,

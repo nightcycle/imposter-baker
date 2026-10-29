@@ -355,12 +355,14 @@ fn surface_maps_and_normals_use_uvs() {
 }
 
 #[test]
-fn legacy_texture_tint_matches_linear_multiplication_without_changing_surface_tints() {
+fn legacy_color_textures_round_trip_srgb_without_extra_gamma() {
     let mut s = cube();
     s.objects[0].material.color = Vec3::splat(0.5);
     let untextured = render::render(&s, 0, 1).unwrap();
     assert_eq!(untextured[0].get_pixel(14, 14).0, [128, 128, 128, 255]);
-    for (texture_value, expected) in [(255, 188), (128, 137), (64, 99)] {
+    // Legacy texture tint (FileMesh.VertexColor) is separate from Part.Color.
+    s.objects[0].material.color = Vec3::ONE;
+    for texture_value in [255, 128, 64] {
         s.objects[0].material.color_map = Some(scene::Texture(std::sync::Arc::new(
             image::RgbaImage::from_pixel(
                 1,
@@ -371,7 +373,7 @@ fn legacy_texture_tint_matches_linear_multiplication_without_changing_surface_ti
         let textured = render::render(&s, 0, 1).unwrap();
         assert_eq!(
             textured[0].get_pixel(14, 14).0,
-            [expected, expected, expected, 255]
+            [texture_value, texture_value, texture_value, 255]
         );
     }
     let m = &mut s.objects[0].material;
@@ -382,6 +384,76 @@ fn legacy_texture_tint_matches_linear_multiplication_without_changing_surface_ti
     )));
     let surface = render::render(&s, 0, 1).unwrap();
     assert_eq!(surface[0].get_pixel(14, 14).0, [128, 128, 128, 255]);
+}
+
+#[test]
+fn legacy_mesh_texture_replaces_part_color_and_honors_file_mesh_vertex_color() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::write(tmp.path().join("mesh.mesh"),
+        "version 1.01\n1\n[-0.5,-0.5,0][0,0,1][0,0,0][0.5,-0.5,0][0,0,1][1,0,0][0,0.5,0][0,0,1][0.5,1,0]"
+    ).unwrap();
+    image::RgbaImage::from_pixel(1, 1, image::Rgba([88, 98, 71, 255]))
+        .save(tmp.path().join("texture.png"))
+        .unwrap();
+    fs::write(
+        tmp.path().join("map.json"),
+        r#"{"rbxassetid://1":"mesh.mesh","rbxassetid://2":"texture.png"}"#,
+    )
+    .unwrap();
+    let assets = Assets::new(
+        tmp.path().join("cache"),
+        true,
+        Some(&tmp.path().join("map.json")),
+    )
+    .unwrap();
+    for special in [false, true] {
+        for color in [0.0, 0.5, 1.0] {
+            let mesh = InstanceBuilder::new(if special { "SpecialMesh" } else { "MeshPart" })
+                .with_property(
+                    "MeshId",
+                    rbx_dom_weak::types::ContentId::from("rbxassetid://1"),
+                )
+                .with_property(
+                    if special { "TextureId" } else { "TextureID" },
+                    rbx_dom_weak::types::ContentId::from("rbxassetid://2"),
+                );
+            let part = if special {
+                InstanceBuilder::new("Part")
+                    .with_child(mesh.with_property("VertexColor", Vector3::new(0.5, 1.0, 1.0)))
+            } else {
+                mesh.with_property("InitialSize", Vector3::new(1.0, 1.0, 1.0))
+            };
+            let dom = WeakDom::new(
+                InstanceBuilder::new("DataModel").with_child(
+                    part.with_property("Size", Vector3::new(1.0, 1.0, 1.0))
+                        .with_property(
+                            "Color",
+                            rbx_dom_weak::types::Color3::new(color, color, color),
+                        ),
+                ),
+            );
+            let path = tmp.path().join("textured.rbxmx");
+            rbx_xml::to_writer(
+                fs::File::create(&path).unwrap(),
+                &dom,
+                dom.root().children(),
+                rbx_xml::EncodeOptions::default(),
+            )
+            .unwrap();
+            let loaded = scene::load(&path, &assets).unwrap();
+            assert_eq!(
+                loaded.objects[0].material.color,
+                if special {
+                    Vec3::new(0.5, 1.0, 1.0)
+                } else {
+                    Vec3::ONE
+                }
+            );
+            let frame = render::render(&loaded, 0, 1).unwrap();
+            let pixel = frame[8].pixels().find(|p| p[3] == 255).unwrap();
+            assert_eq!(pixel.0, [if special { 44 } else { 88 }, 98, 71, 255]);
+        }
+    }
 }
 
 #[test]
@@ -466,6 +538,7 @@ fn demo_models() {
             Path::new(&format!("test/demo/{name}.png")),
             &BakeOptions {
                 overwrite: true,
+                max_memory_mib: 2048,
                 ..BakeOptions::default()
             },
         )

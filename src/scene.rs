@@ -222,7 +222,7 @@ pub fn load(path: &Path, assets: &Assets) -> Result<Scene> {
         let mesh_id = if class == "MeshPart" {
             content(i, &["MeshContent", "MeshId"])
         } else {
-            special.and_then(|s| content(s, &["MeshId"]))
+            special.and_then(|s| content(s, &["MeshContent", "MeshId"]))
         };
         let mut g = if let Some(id) = mesh_id {
             if !meshes.contains_key(&id) {
@@ -351,6 +351,13 @@ pub fn load(path: &Path, assets: &Assets) -> Result<Scene> {
                 special.unwrap_or(i),
                 &["TextureContent", "TextureID", "TextureId"],
             )?;
+            if m.color_map.is_some() {
+                // Legacy mesh textures replace Part.Color. FileMesh has its
+                // own VertexColor multiplier; MeshPart has no equivalent tint.
+                m.color = special
+                    .and_then(|s| v3(s, "VertexColor"))
+                    .unwrap_or(Vec3::ONE);
+            }
         }
         objects.push(Object {
             geometry: g,

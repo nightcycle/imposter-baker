@@ -15,6 +15,15 @@ const RESOLUTION: u32 = 164;
 const PADDING: u32 = 2;
 const MAPS: [&str; 5] = ["color", "normal", "roughness", "metalness", "emissive"];
 
+fn demo_resolution(manifest: &Manifest) -> u32 {
+    // Each model gets at most a 504px square in the shared 1024px atlas.
+    // Spend that space on detail when fewer views were requested.
+    manifest
+        .settings
+        .max_resolution_px
+        .min((RESOLUTION + 2 * PADDING) * 3 / manifest.columns.max(manifest.rows) - 2 * PADDING)
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Manifest {
@@ -42,6 +51,9 @@ fn frame(position: Vec3, rotation: glam::Mat3) -> CFrame {
 }
 
 fn resize_capture(source: &RgbaImage, resolution: u32, layer: &str) -> RgbaImage {
+    if source.dimensions() == (resolution, resolution) {
+        return source.clone();
+    }
     // Filter covered samples, not the black RGB of transparent texels. Color
     // uses linear light; normal vectors need normalization after filtering.
     let weighted = Rgba32FImage::from_fn(source.width(), source.height(), |x, y| {
@@ -126,7 +138,8 @@ fn compact(source: &RgbaImage, manifest: &Manifest, layer: &str) -> Result<RgbaI
         source.dimensions() == (manifest.columns * source_tile, manifest.rows * source_tile),
         "atlas dimensions do not match its manifest"
     );
-    let tile = RESOLUTION + 2 * PADDING;
+    let resolution = demo_resolution(manifest);
+    let tile = resolution + 2 * PADDING;
     let mut result = RgbaImage::new(manifest.columns * tile, manifest.rows * tile);
     for index in 0..manifest.settings.count() {
         let column = index % manifest.columns;
@@ -139,11 +152,11 @@ fn compact(source: &RgbaImage, manifest: &Manifest, layer: &str) -> Result<RgbaI
             manifest.settings.max_resolution_px,
         )
         .to_image();
-        let image = resize_capture(&capture, RESOLUTION, layer);
+        let image = resize_capture(&capture, resolution, layer);
         for y in 0..tile {
             for x in 0..tile {
-                let sx = x.saturating_sub(PADDING).min(RESOLUTION - 1);
-                let sy = y.saturating_sub(PADDING).min(RESOLUTION - 1);
+                let sx = x.saturating_sub(PADDING).min(resolution - 1);
+                let sy = y.saturating_sub(PADDING).min(resolution - 1);
                 let mut pixel = *image.get_pixel(sx, sy);
                 if x < PADDING || y < PADDING || x >= tile - PADDING || y >= tile - PADDING {
                     pixel[3] = 0;
@@ -359,7 +372,7 @@ fn build(base: &Path, output: &Path) -> Result<()> {
                         .with("BoundsSize", vector(bounds * scale))
                         .with("PanShotCount", manifest.settings.pan_shot_count as f64)
                         .with("TiltShotCount", manifest.settings.tilt_shot_count as f64)
-                        .with("MaxResolutionPx", RESOLUTION as f64)
+                        .with("MaxResolutionPx", demo_resolution(&manifest) as f64)
                         .with("PaddingPx", PADDING as f64)
                         .with("TiltOffset", manifest.settings.tilt_offset as f64)
                         .with(
@@ -450,6 +463,35 @@ fn main() -> Result<()> {
 mod tests {
     use super::*;
     use image::Rgba;
+    #[test]
+    fn single_view_preserves_full_resolution_and_crisp_rim() {
+        let manifest = Manifest {
+            settings: Settings {
+                pan_shot_count: 1,
+                max_resolution_px: 500,
+                tilt_offset: 90.0,
+                ..Settings::default()
+            },
+            bounds_c_frame: [0.0; 12],
+            bounds_size: [1.0; 3],
+            columns: 1,
+            rows: 1,
+            layers: BTreeMap::new(),
+        };
+        let image = RgbaImage::from_fn(504, 504, |x, _| {
+            if x < 252 {
+                Rgba([88, 98, 71, 255])
+            } else {
+                Rgba([30, 40, 20, 255])
+            }
+        });
+        let result = compact(&image, &manifest, "color").unwrap();
+        assert_eq!(result.dimensions(), (504, 504));
+        assert_eq!(demo_resolution(&manifest), 500);
+        assert_eq!(result.get_pixel(251, 250), image.get_pixel(251, 250));
+        assert_eq!(result.get_pixel(252, 250), image.get_pixel(252, 250));
+        assert_eq!(result.get_pixel(0, 0)[3], 0);
+    }
     #[test]
     fn compact_capture_preserves_tile_layout_and_transparent_padding() {
         let settings = Settings::default();

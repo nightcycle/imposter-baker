@@ -3,7 +3,7 @@
 return table.freeze({
 	PanShotCount = 1,
 	TiltShotCount = 1,
-	MaxResolutionPx = 252,
+	MaxResolutionPx = 500,
 	PaddingPx = 2,
 	TiltConstraints = NumberRange.new(-180, 180),
 	TiltOffset = 90,

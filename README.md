@@ -86,6 +86,8 @@ Directory output groups each snapshot's layers under its shot key: `shot_0000/co
 
 Normals encode +R toward quad right, +G toward quad up, +B toward the capture camera. Source tangent normal maps are transformed into this frame. Roughness defaults to 0.6; metalness defaults to 0 except for basic metal material enums. Those defaults are approximations when no source map exists. Emissive strength and tint are retained per source surface in `emissiveSurfaces`; masks remain unmodified. Runtime emission strength and tint are shared per batch, so group objects with compatible emission settings.
 
+Legacy mesh textures replace `Part.Color`; `SpecialMesh.VertexColor` supplies their optional tint. Both legacy color textures and SurfaceAppearance albedo use sRGB, decoded for compositing and encoded once on export. Untextured parts retain their part color.
+
 Legacy TextureID samples, vertex colors, and part tint are multiplied in linear space and encoded to sRGB for SurfaceAppearance export. Source SurfaceAppearance color maps retain their sRGB interpretation. This conversion keeps native texture midtones from becoming darker when moved into PBR maps.
 
 Cavity shading samples the floating-point capture depth and normals before PNG quantization. It adds local contrast around recesses and overlapping surfaces without baking a light direction. Transparent background pixels do not occlude silhouettes. The runtime `color` map combines albedo and this shading because SurfaceAppearance has no separate occlusion input. Set `AmbientOcclusionStrength = 0` to use raw color, or composite the exported `albedo` and `occlusion` maps yourself. This capture-space approximation cannot see hidden geometry or reproduce cast shadows.
