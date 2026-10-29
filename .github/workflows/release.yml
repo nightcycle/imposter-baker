@@ -1,0 +1,102 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: bash
+jobs:
+  binaries:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+            platform: windows-x86_64
+            extension: .exe
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            platform: linux-x86_64
+            extension: ''
+          - os: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+            platform: linux-aarch64
+            extension: ''
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            platform: macos-x86_64
+            extension: ''
+          - os: macos-15
+            target: aarch64-apple-darwin
+            platform: macos-aarch64
+            extension: ''
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Verify release version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          python -c 'import os,tomllib; assert tomllib.load(open("Cargo.toml","rb"))["package"]["version"] == os.environ["TAG"].removeprefix("v")'
+      - run: cargo test --locked --target ${{ matrix.target }}
+      - run: cargo build --locked --release --target ${{ matrix.target }}
+      - name: Package executable for Rokit
+        env:
+          TAG: ${{ github.ref_name }}
+          PLATFORM: ${{ matrix.platform }}
+          TARGET: ${{ matrix.target }}
+          EXTENSION: ${{ matrix.extension }}
+        run: |
+          mkdir -p dist
+          python - <<'PY'
+          import os, zipfile
+          from pathlib import Path
+          name = "imposter-baker" + os.environ["EXTENSION"]
+          version = os.environ["TAG"].removeprefix("v")
+          output = f"dist/imposter-baker-{version}-{os.environ['PLATFORM']}.zip"
+          with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
+              archive.write(Path("target") / os.environ["TARGET"] / "release" / name, name)
+              archive.write("LICENSE", "LICENSE")
+              archive.write("README.md", "README.md")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: imposter-baker-${{ matrix.platform }}
+          path: dist/*.zip
+  package:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: CompeyDev/setup-rokit@v0.1.2
+      - run: mkdir -p dist
+      - run: wally package --project-path imposter-render --output dist/imposter-render.zip
+      - run: rojo build imposter-render/default.project.json --output dist/imposter-render.rbxm
+      - uses: actions/upload-artifact@v4
+        with:
+          name: imposter-render
+          path: dist/*
+  publish:
+    needs: [binaries, package]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Publish tagged GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes artifacts/*

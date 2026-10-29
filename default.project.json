@@ -1,0 +1,10 @@
+{
+  "name": "imposter-baker-tests",
+  "tree": {
+    "$className": "DataModel",
+    "ReplicatedStorage": {
+      "ImposterRender": { "$path": "imposter-render/src" },
+      "ImposterTests": { "$path": "test/luau" }
+    }
+  }
+}

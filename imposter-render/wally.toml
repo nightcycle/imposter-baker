@@ -1,0 +1,11 @@
+[package]
+name = "nightcycle/imposter-render"
+version = "0.1.0"
+description = "Typed shared EditableMesh / PBR atlas runtime for imposter-baker"
+license = "Apache-2.0"
+authors = ["nightcycle"]
+realm = "shared"
+registry = "https://github.com/UpliftGames/wally-index"
+include = ["src", "src/**", "default.project.json", "wally.toml", "README.md", "LICENSE"]
+
+[dependencies]

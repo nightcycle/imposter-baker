@@ -1,0 +1,31 @@
+name: CI
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  rust:
+    strategy:
+      matrix:
+        os: [ubuntu-22.04, windows-2022, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - run: cargo fmt --check
+      - run: cargo test --locked --all-targets
+      - run: cargo clippy --locked --all-targets -- -D warnings
+  luau:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: CompeyDev/setup-rokit@v0.1.2
+      - run: mkdir -p test/tooling
+      - run: curl --fail --location https://luau-lsp.pages.dev/type-definitions/globalTypes.None.d.luau --output test/tooling/roblox.d.luau
+      - run: rojo sourcemap default.project.json --output test/tooling/sourcemap.json
+      - run: luau-lsp analyze --definitions=@roblox=test/tooling/roblox.d.luau --sourcemap=test/tooling/sourcemap.json --platform=roblox imposter-render/src test/luau
+      - run: stylua --check imposter-render/src test/luau test/run.luau
+      - run: lune run test/run.luau
+      - run: wally package --project-path imposter-render --output test/tooling/imposter-render.zip
+      - run: rojo build imposter-render/default.project.json --output test/tooling/imposter-render.rbxm

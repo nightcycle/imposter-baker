@@ -1,0 +1,29 @@
+[package]
+name = "imposter-baker"
+version = "0.1.0"
+edition = "2024"
+description = "Standalone Roblox model imposter and PBR atlas baker"
+license = "Apache-2.0"
+repository = "https://github.com/nightcycle/imposter-baker"
+rust-version = "1.90"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+glam = "0.30"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "tga", "bmp", "webp"] }
+rbx_binary = "3"
+rbx_dom_weak = "4"
+rbx_xml = "3"
+rbx_mesh = "=0.7.0"
+rayon = "1"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"
+
+[[test]]
+name = "baking"
+path = "test/baking.rs"
