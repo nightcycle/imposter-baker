@@ -20,7 +20,7 @@ cargo build --locked --release
 cargo install --locked --path .
 ```
 
-To distribute through [Rokit](https://github.com/rojo-rbx/rokit), push a version tag matching both package manifests and `Cargo.lock`, such as `v0.1.0`. The release workflow waits for full CI, then creates ZIPs containing the executable at the archive root for Windows x86_64, Linux x86_64/ARM64, and macOS Intel/ARM64. It also attaches the Wally package, a standalone runtime RBXM, and SHA-256 checksums. See the [release guide](.github/RELEASING.md) for tagging, prereleases, manual runs, and optional automatic Wally publishing.
+To distribute through [Rokit](https://github.com/rojo-rbx/rokit), push a version tag matching both package manifests and `Cargo.lock`, such as `v0.1.0`. The release workflow waits for full CI, then creates ZIPs containing the executable at the archive root for Windows x86_64, Linux x86_64/ARM64, and macOS Intel/ARM64. It also attaches the Wally package, a standalone runtime RBXM, and SHA-256 checksums. See the [release guide](.github/RELEASING.md) for tagging, prereleases, manual runs, and automatic Wally publishing.
 
 After that GitHub release has been published, consumers can install it with:
 

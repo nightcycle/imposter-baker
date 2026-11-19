@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing stable release tag to publish (for example 0.1.0 or v0.1.0)
+        description: Existing release version or tag to publish (for example 0.1.1 or v0.1.1)
         required: true
         type: string
   workflow_call:
@@ -16,6 +16,9 @@ on:
         required: true
 permissions:
   contents: read
+defaults:
+  run:
+    shell: bash
 concurrency:
   group: wally-${{ inputs.tag }}
   cancel-in-progress: false
@@ -26,25 +29,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag }}
           fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Validate stable tag and matching manifest versions
+      - name: Resolve version and validate the tagged source
+        id: version
         env:
-          TAG: ${{ inputs.tag }}
+          REQUESTED_TAG: ${{ inputs.tag }}
         run: |
-          python scripts/release.py validate "$TAG"
+          cp scripts/release.py "$RUNNER_TEMP/release.py"
+          cp scripts/publish_wally.py "$RUNNER_TEMP/publish_wally.py"
+          TAG="$(python "$RUNNER_TEMP/release.py" --root "$GITHUB_WORKSPACE" resolve "$REQUESTED_TAG")"
+          git checkout --detach "refs/tags/$TAG"
+          python "$RUNNER_TEMP/release.py" --root "$GITHUB_WORKSPACE" validate "$TAG"
           test "$(git rev-parse "refs/tags/$TAG^{commit}")" = "$(git rev-parse HEAD)"
-          if [[ "$TAG" == *-* ]]; then
-            echo "Publish prerelease packages manually; this workflow accepts stable versions."
-            exit 1
-          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
       - name: Require an existing published GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.tag }}
+          TAG: ${{ steps.version.outputs.tag }}
         run: test "$(gh release view "$TAG" --json isDraft --jq '.isDraft')" = 'false'
       - uses: CompeyDev/setup-rokit@v0.2.1
         with:
@@ -54,4 +58,4 @@ jobs:
       - name: Publish registry package
         env:
           WALLY_AUTH_TOKEN: ${{ secrets.WALLY_AUTH_TOKEN }}
-        run: python scripts/publish_wally.py
+        run: python "$RUNNER_TEMP/publish_wally.py"

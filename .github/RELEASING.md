@@ -29,9 +29,11 @@ The CLI and runtime package currently share one version. Before tagging:
    git push origin v0.1.0
    ```
 
-Tags may use either `0.1.0` or `v0.1.0`. Version comparisons strip all leading `v`/`V` characters from the tag, both manifests, and the CLI lockfile entry; the remaining version and prerelease identifiers must match exactly. Archive names always use the version without the prefix. Git checkout and release operations retain the actual tag name. Both prefixed and unprefixed version tags trigger the release workflow.
+Tags may use either `0.1.0` or `v0.1.0`. Version inputs trim surrounding whitespace and accept full `refs/tags/` refs. Version comparisons strip all leading `v`/`V` characters; the remaining version and prerelease identifiers must match exactly. Manual inputs resolve to the actual existing Git tag, so entering `0.1.1` also finds `v0.1.1`. If multiple equivalent tags exist, use their exact spelling. Archive names always use the version without the prefix.
 
-The tagged commit must contain the release workflows and scripts. You can also choose **Actions → Release → Run workflow**, entering an existing version tag. Both entry points verify the exact tag commit, run full CI against that tag, then build native binaries for:
+Pushing a new version tag automatically runs CI, publishes the GitHub binaries/assets, and then publishes the matching Wally package. Both prefixed and unprefixed tags work. No `PUBLISH_WALLY` variable or secret is required; `WALLY_AUTH_TOKEN` is the publishing credential.
+
+New version tags should include these workflows and scripts. You can also choose **Actions → Release → Run workflow** on `main`, entering an existing version tag. Manual retries preserve the workflow revision's validation/publishing helpers before checking out the tagged source, so helper fixes on `main` apply without moving an existing tag. Both entry points verify the exact tag commit, run full CI against that tag, then build native binaries for:
 
 | Platform | Architecture |
 | --- | --- |
@@ -43,21 +45,20 @@ Each ZIP contains the executable, license, and README at the archive root. Unix 
 
 The release also includes `imposter-render.zip`, `imposter-render.rbxm`, `demo.rbxl`, and `SHA256SUMS`. The demo embeds the package and baked texture pixels and is ready for Studio Play mode. Checksums are generated only after all eight binary/package/demo artifacts are present. If the release does not exist, the workflow creates a draft with the assets and then publishes it. If it already exists, whether draft or published, the workflow uploads the assets to it and replaces same-named assets on retries. An existing published release is not an error; its title and release notes are preserved.
 
-Tags such as `v0.2.0-rc.1` publish GitHub prereleases and do not change the latest stable release. Set the same prerelease version in both manifests and the lockfile. Automatic Wally publication is limited to stable versions.
+Tags such as `v0.2.0-rc.1` publish GitHub prereleases and the matching Wally prerelease package, without changing GitHub's latest stable release. Set the same prerelease version in both manifests and the lockfile.
 
 GitHub releases use the repository's built-in `GITHUB_TOKEN`; no personal GitHub token is required for this step. The repository must allow Actions and the workflow's `contents: write` permission. No crates.io publication is configured.
 
 ## Wally registry publication
 
-GitHub release attachments and the Wally registry are separate distribution channels. To enable automatic registry publication after a successful stable GitHub release:
+GitHub release attachments and the Wally registry are separate distribution channels, published together for every version tag. To configure the Wally credential:
 
 1. Authenticate locally using `wally login --project-path imposter-render` with an account that can publish `nightcycle/imposter-render`.
 2. Store that account's Wally authentication token as the Actions secret **`WALLY_AUTH_TOKEN`**. Obtain it from your local Wally authentication configuration; do not commit it or paste it into workflow source.
-3. Set the repository Actions variable **`PUBLISH_WALLY`** to **`true`**.
 
-With the variable unset, GitHub releases still publish normally and contain the Wally package ZIP. To publish a stable package independently or retry a failed registry upload, run **Actions → Publish Wally package → Run workflow** and enter its existing GitHub release tag. This manual workflow needs the secret but does not require `PUBLISH_WALLY=true`.
+To retry only the registry upload, run **Actions → Publish Wally package → Run workflow** on `main` and enter its existing GitHub release version/tag. Leading/trailing whitespace is ignored. The workflow resolves the actual tag and uses the current validation/publishing helpers against that tagged source.
 
-Both paths require an existing published GitHub release and matching manifest versions. Wally package versions are immutable; do not republish an already-published version. If Wally publication fails after the GitHub release succeeds, retry the Wally workflow rather than rerunning the GitHub release job.
+Both paths require an existing published GitHub release and matching manifest versions. Wally package versions are immutable; an already-published package/version is detected in the configured registry index and skipped successfully. Registry lookup errors fail instead of pretending a version is absent. If Wally publication fails after the GitHub release succeeds, retry the Wally workflow rather than rerunning the GitHub release job.
 
 The pinned Wally 0.3.2 CLI may return success exit status for an HTTP failure. `scripts/publish_wally.py` additionally requires its explicit publication confirmation and masks the supplied token from captured output.
 
@@ -80,4 +81,4 @@ python scripts/release.py checksums v0.1.0 artifacts
 
 The package command validates both manifests and the lockfile, uses the selected target's executable, and normalizes archive timestamps. The checksum command rejects missing or unexpected files. Running these commands locally does not publish anything.
 
-`python scripts/release.py publish <tag> <artifact-directory>` performs the same version and complete-asset checks, generates `SHA256SUMS`, and uploads to GitHub using the authenticated `gh` CLI. It creates a release when missing or updates an existing draft/published release. This command does publish and can replace same-named assets. Rerunning an old Actions run uses that run's original workflow revision; the updated publishing helper must be present in the checkout used by the publish job.
+`python scripts/release.py publish <tag> <artifact-directory>` performs the same version and complete-asset checks, generates `SHA256SUMS`, and uploads to GitHub using the authenticated `gh` CLI. It creates a release when missing or updates an existing draft/published release. This command does publish and can replace same-named assets. Rerunning an old Actions run still uses that run's original workflow revision; start a new manual run on `main` to use updated workflow code.

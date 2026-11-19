@@ -1,10 +1,13 @@
 import hashlib
+import base64
 import contextlib
 import importlib.util
 import io
 import itertools
+import json
 import os
 import stat
+import subprocess
 import tempfile
 import unittest
 import zipfile
@@ -71,6 +74,43 @@ class ReleaseTests(unittest.TestCase):
             with self.subTest(tag=tag), self.assertRaises(ValueError):
                 release.validate(self.root, tag)
 
+    def test_version_input_trims_whitespace_and_full_git_ref(self):
+        for tag in (" v0.1.0", "0.1.0 ", "\tVvv0.1.0\r\n", " refs/tags/v0.1.0 "):
+            with self.subTest(tag=tag):
+                self.assertEqual(release.validate(self.root, tag), "0.1.0")
+        for tag in ("v 0.1.0", "0.1. 0", "refs/heads/0.1.0", " \t "):
+            with self.subTest(tag=tag), self.assertRaises(ValueError):
+                release.normalize_version(tag)
+
+    def make_git_tags(self, *tags):
+        subprocess.run(["git", "init", "--quiet", str(self.root)], check=True, capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(self.root), "-c", "user.name=Release Tests", "-c", "user.email=tests@example.invalid",
+             "commit", "--allow-empty", "--quiet", "-m", "Release fixture"], check=True, capture_output=True,
+        )
+        for tag in tags:
+            subprocess.run(["git", "-C", str(self.root), "tag", tag], check=True, capture_output=True)
+
+    def test_resolves_whitespace_and_prefix_variants_to_actual_git_tag(self):
+        self.make_git_tags("v0.1.1", "v0.2.0-rc.1", "documentation")
+        for value in (" v0.1.1", "0.1.1", "Vvv0.1.1\n", " refs/tags/v0.1.1 "):
+            with self.subTest(value=value):
+                self.assertEqual(release.resolve_tag(self.root, value), "v0.1.1")
+        self.assertEqual(release.resolve_tag(self.root, "0.2.0-rc.1"), "v0.2.0-rc.1")
+        with self.assertRaisesRegex(ValueError, "no existing Git tag"):
+            release.resolve_tag(self.root, "v9.9.9")
+
+    def test_resolver_preserves_exact_tag_and_rejects_ambiguous_alias(self):
+        self.make_git_tags("0.1.1", "v0.1.1")
+        self.assertEqual(release.resolve_tag(self.root, "0.1.1"), "0.1.1")
+        self.assertEqual(release.resolve_tag(self.root, " v0.1.1 "), "v0.1.1")
+        with self.assertRaisesRegex(ValueError, "multiple Git tags"):
+            release.resolve_tag(self.root, "vv0.1.1")
+
+    def test_mismatch_error_reports_actual_and_requested_versions(self):
+        with self.assertRaisesRegex(ValueError, "Cargo.toml declares '0.1.0'.*requires '0.1.1'"):
+            release.validate(self.root, " v0.1.1 ")
+
     def test_archive_is_reproducible_and_preserves_unix_executable_permission(self):
         binary = self.root / "target/x86_64-unknown-linux-gnu/release/imposter-baker"
         binary.parent.mkdir(parents=True)
@@ -113,23 +153,76 @@ class ReleaseTests(unittest.TestCase):
                 self.assertEqual(release.checksums(directory, tag).read_bytes(), original)
 
     @patch.dict(os.environ, {"WALLY_AUTH_TOKEN": "test-token"})
+    @patch.object(wally, "is_published", return_value=False)
     @patch.object(wally.subprocess, "run")
-    def test_wally_zero_exit_http_failure_is_rejected(self, run):
+    def test_wally_zero_exit_http_failure_is_rejected(self, run, published):
         run.side_effect = [CompletedProcess([], 0, "", ""), CompletedProcess([], 0, "Error: 403 Forbidden\n", "")]
         with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(RuntimeError):
             wally.publish()
 
     @patch.dict(os.environ, {"WALLY_AUTH_TOKEN": "test-token"})
+    @patch.object(wally, "is_published", return_value=False)
     @patch.object(wally.subprocess, "run")
-    def test_wally_confirmed_publication_succeeds(self, run):
+    def test_wally_confirmed_publication_succeeds(self, run, published):
         run.side_effect = [CompletedProcess([], 0, "", ""), CompletedProcess([], 0, "Package published successfully!\n", "")]
         with contextlib.redirect_stdout(io.StringIO()):
             wally.publish()
 
     @patch.dict(os.environ, {}, clear=True)
+    @patch.object(wally, "is_published", return_value=False)
     @patch.object(wally.subprocess, "run")
-    def test_missing_wally_secret_fails_before_authentication(self, run):
+    def test_missing_wally_secret_fails_before_authentication(self, run, published):
         with self.assertRaises(RuntimeError):
+            wally.publish()
+        run.assert_not_called()
+
+    @patch.dict(os.environ, {}, clear=True)
+    @patch.object(wally, "is_published", return_value=True)
+    @patch.object(wally.subprocess, "run")
+    def test_wally_retry_skips_an_already_published_version(self, run, published):
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            wally.publish()
+        self.assertIn("already published", output.getvalue())
+        run.assert_not_called()
+
+    def wally_manifest(self):
+        project = self.root / "imposter-render"
+        (project / "wally.toml").write_text(
+            '[package]\nname="nightcycle/imposter-render"\nversion="0.1.0"\n'
+            'registry="https://github.com/UpliftGames/wally-index"\n', encoding="utf-8"
+        )
+        return project
+
+    @patch.object(wally.urllib.request, "urlopen")
+    def test_wally_registry_check_matches_name_and_normalized_version(self, urlopen):
+        project = self.wally_manifest()
+        for name, version, expected in (
+            ("nightcycle/imposter-render", "v0.1.0", True),
+            ("nightcycle/imposter-render", "0.1.1", False),
+            ("nightcycle/imposter-render", "0.1.0-rc.1", False),
+            ("other/package", "0.1.0", False),
+        ):
+            with self.subTest(name=name, version=version):
+                entry = json.dumps({"package": {"name": name, "version": version}}).encode()
+                response = {"content": base64.b64encode(entry).decode()}
+                urlopen.return_value = io.BytesIO(json.dumps(response).encode())
+                self.assertEqual(wally.is_published(project), expected)
+        request = urlopen.call_args.args[0]
+        self.assertEqual(request.full_url, "https://api.github.com/repos/UpliftGames/wally-index/contents/nightcycle/imposter-render")
+
+    @patch.object(wally.urllib.request, "urlopen")
+    def test_wally_registry_errors_do_not_trigger_accidental_republication(self, urlopen):
+        project = self.wally_manifest()
+        urlopen.side_effect = wally.urllib.error.HTTPError("https://example.invalid", 404, "Not found", {}, None)
+        self.assertFalse(wally.is_published(project))
+        urlopen.side_effect = wally.urllib.error.HTTPError("https://example.invalid", 403, "Forbidden", {}, None)
+        with self.assertRaisesRegex(RuntimeError, "HTTP 403"):
+            wally.is_published(project)
+
+    @patch.object(wally, "is_published", side_effect=RuntimeError("Registry unavailable"))
+    @patch.object(wally.subprocess, "run")
+    def test_wally_publication_stops_when_registry_check_fails(self, run, published):
+        with self.assertRaisesRegex(RuntimeError, "Registry unavailable"):
             wally.publish()
         run.assert_not_called()
 

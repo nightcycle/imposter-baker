@@ -22,24 +22,55 @@ VERSION_PATTERN = re.compile(
 )
 
 
+def clean_tag(value: str) -> str:
+    """Trim workflow input and accept full Git tag refs without changing tag spelling."""
+    return value.strip().removeprefix("refs/tags/")
+
+
 def normalize_version(value: str) -> str:
-    """Ignore leading v/V prefixes without altering prerelease identifiers."""
-    version = value.lstrip("vV")
+    """Ignore surrounding whitespace and v/V prefixes, preserving version suffixes."""
+    version = clean_tag(value).lstrip("vV")
     if not VERSION_PATTERN.fullmatch(version):
-        raise ValueError("release version must be MAJOR.MINOR.PATCH with an optional SemVer prerelease and v prefix")
+        raise ValueError(f"invalid release version {value!r}: expected MAJOR.MINOR.PATCH with an optional SemVer prerelease and v prefix")
     return version
+
+
+def resolve_tag(root: Path, value: str) -> str:
+    """Resolve equivalent version inputs to an actual local tag before checkout."""
+    requested = clean_tag(value)
+    version = normalize_version(requested)
+    result = subprocess.run(
+        ["git", "-C", str(root), "for-each-ref", "--format=%(refname:strip=2)", "refs/tags"],
+        capture_output=True, text=True, check=True,
+    )
+    tags = result.stdout.splitlines()
+    if requested in tags:
+        return requested
+    matches = []
+    for tag in tags:
+        try:
+            if normalize_version(tag) == version:
+                matches.append(tag)
+        except ValueError:
+            continue
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        raise ValueError(f"no existing Git tag matches version {version!r}; create and push that version tag first")
+    raise ValueError(f"multiple Git tags match version {version!r}: {', '.join(matches)}; specify the exact tag")
 
 
 def validate(root: Path, tag: str) -> str:
     version = normalize_version(tag)
     for filename in ("Cargo.toml", "imposter-render/wally.toml"):
         manifest = tomllib.loads((root / filename).read_text(encoding="utf-8"))
-        if normalize_version(manifest["package"]["version"]) != version:
-            raise ValueError(f"{filename} version must match {tag}")
+        actual = manifest["package"]["version"]
+        if normalize_version(actual) != version:
+            raise ValueError(f"{filename} declares {actual!r}, but release {tag!r} requires {version!r}")
     lock = tomllib.loads((root / "Cargo.lock").read_text(encoding="utf-8"))
     versions = [normalize_version(p["version"]) for p in lock["package"] if p["name"] == "imposter-baker"]
     if versions != [version]:
-        raise ValueError("Cargo.lock must contain the matching imposter-baker version; run cargo check")
+        raise ValueError(f"Cargo.lock contains imposter-baker versions {versions!r}, expected [{version!r}]; run cargo check")
     return version
 
 
@@ -83,6 +114,7 @@ def checksums(directory: Path, tag: str) -> Path:
 
 
 def publish(root: Path, tag: str, directory: Path) -> None:
+    tag = clean_tag(tag)
     version = validate(root, tag)
     checksums(directory, tag)
     assets = [str(path.resolve()) for path in sorted(directory.iterdir()) if path.is_file()]
@@ -114,6 +146,8 @@ def main() -> None:
     commands = parser.add_subparsers(dest="command", required=True)
     check = commands.add_parser("validate")
     check.add_argument("tag")
+    resolve = commands.add_parser("resolve", help="Resolve a version input to an existing Git tag")
+    resolve.add_argument("tag")
     pack = commands.add_parser("package")
     pack.add_argument("tag")
     pack.add_argument("platform", choices=PLATFORMS)
@@ -128,6 +162,8 @@ def main() -> None:
     try:
         if args.command == "validate":
             print(validate(args.root, args.tag))
+        elif args.command == "resolve":
+            print(resolve_tag(args.root, args.tag))
         elif args.command == "package":
             print(package(args.root, args.tag, args.platform, args.output))
         elif args.command == "checksums":

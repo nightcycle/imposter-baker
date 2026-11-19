@@ -26,20 +26,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Validate versions and exact tag commit
+      - name: Resolve version and validate the tagged source
         id: version
         env:
-          TAG: ${{ inputs.tag || github.ref_name }}
+          REQUESTED_TAG: ${{ inputs.tag || github.ref_name }}
         run: |
-          python scripts/release.py validate "$TAG"
+          cp scripts/release.py "$RUNNER_TEMP/release.py"
+          TAG="$(python "$RUNNER_TEMP/release.py" --root "$GITHUB_WORKSPACE" resolve "$REQUESTED_TAG")"
+          git checkout --detach "refs/tags/$TAG"
+          VERSION="$(python "$RUNNER_TEMP/release.py" --root "$GITHUB_WORKSPACE" validate "$TAG")"
           test "$(git rev-parse "refs/tags/$TAG^{commit}")" = "$(git rev-parse HEAD)"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          if [[ "$TAG" == *-* ]]; then
+          if [[ "$VERSION" == *-* ]]; then
             echo "prerelease=true" >> "$GITHUB_OUTPUT"
           else
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
@@ -128,11 +130,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.metadata.outputs.tag }}
           fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Preserve current publishing helper and check out release source
+        env:
+          TAG: ${{ needs.metadata.outputs.tag }}
+        run: |
+          cp scripts/release.py "$RUNNER_TEMP/release.py"
+          git checkout --detach "refs/tags/$TAG"
       - uses: actions/download-artifact@v4
         with:
           pattern: release-*
@@ -143,10 +150,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.metadata.outputs.tag }}
-        run: python scripts/release.py publish "$TAG" artifacts
+        run: python "$RUNNER_TEMP/release.py" --root "$GITHUB_WORKSPACE" publish "$TAG" artifacts
   wally:
     needs: [metadata, publish]
-    if: vars.PUBLISH_WALLY == 'true' && needs.metadata.outputs.prerelease == 'false'
     uses: ./.github/workflows/wally.yml
     with:
       tag: ${{ needs.metadata.outputs.tag }}
