@@ -2,6 +2,7 @@ import hashlib
 import contextlib
 import importlib.util
 import io
+import itertools
 import os
 import stat
 import tempfile
@@ -37,7 +38,7 @@ class ReleaseTests(unittest.TestCase):
 
     def test_tag_must_match_both_manifests_and_lockfile(self):
         self.assertEqual(release.validate(self.root, "v0.1.0"), "0.1.0")
-        for invalid in ("main", "0.1.0", "v01.1.0", "v0.1.1", "v0.1.0-01", "v0.1.0;echo bad"):
+        for invalid in ("", "v", "main", "v01.1.0", "v0.1.1", "v0.v1.0", "v0.1.0-01", "v0.1.0;echo bad"):
             with self.subTest(tag=invalid), self.assertRaises(ValueError):
                 release.validate(self.root, invalid)
         (self.root / "imposter-render/wally.toml").write_text('[package]\nversion="0.2.0"\n', encoding="utf-8")
@@ -47,6 +48,28 @@ class ReleaseTests(unittest.TestCase):
         (self.root / "Cargo.lock").write_text('[[package]]\nname="imposter-baker"\nversion="0.0.1"\n', encoding="utf-8")
         with self.assertRaises(ValueError):
             release.validate(self.root, "v0.1.0")
+
+    def test_comparisons_ignore_all_leading_v_prefixes_on_either_side(self):
+        for version in ("0.1.0", "0.1.0-preview.1"):
+            for prefixes in itertools.product(("", "v", "Vv"), repeat=4):
+                with self.subTest(version=version, prefixes=prefixes):
+                    tag, cargo, wally_version, lock = [prefix + version for prefix in prefixes]
+                    for name, value in (("Cargo.toml", cargo), ("imposter-render/wally.toml", wally_version)):
+                        (self.root / name).write_text(f'[package]\nversion = "{value}"\n', encoding="utf-8")
+                    (self.root / "Cargo.lock").write_text(
+                        f'[[package]]\nname = "imposter-baker"\nversion = "{lock}"\n', encoding="utf-8"
+                    )
+                    self.assertEqual(release.validate(self.root, tag), version)
+
+    def test_prerelease_identifiers_must_still_match_exactly(self):
+        for name in ("Cargo.toml", "imposter-render/wally.toml"):
+            (self.root / name).write_text('[package]\nversion = "0.1.0-preview.1"\n', encoding="utf-8")
+        (self.root / "Cargo.lock").write_text(
+            '[[package]]\nname = "imposter-baker"\nversion = "0.1.0-preview.1"\n', encoding="utf-8"
+        )
+        for tag in ("v0.1.0-preview.2", "0.1.0-preiew.1", "vv0.1.0-Preview.1", "0.1.0"):
+            with self.subTest(tag=tag), self.assertRaises(ValueError):
+                release.validate(self.root, tag)
 
     def test_archive_is_reproducible_and_preserves_unix_executable_permission(self):
         binary = self.root / "target/x86_64-unknown-linux-gnu/release/imposter-baker"
@@ -63,7 +86,11 @@ class ReleaseTests(unittest.TestCase):
             mode = archive.getinfo("imposter-baker").external_attr >> 16
             self.assertTrue(mode & stat.S_IXUSR)
         os.utime(binary, (1_700_000_000, 1_700_000_000))
-        self.assertEqual(release.package(self.root, "v0.1.0", "linux-x86_64", output).read_bytes(), first)
+        for tag in ("0.1.0", "v0.1.0", "Vvv0.1.0"):
+            with self.subTest(tag=tag):
+                packaged = release.package(self.root, tag, "linux-x86_64", output)
+                self.assertEqual(packaged.name, "imposter-baker-0.1.0-linux-x86_64.zip")
+                self.assertEqual(packaged.read_bytes(), first)
 
     def test_checksums_require_the_complete_asset_set(self):
         directory = self.root / "dist"
@@ -80,7 +107,10 @@ class ReleaseTests(unittest.TestCase):
             digest, name = line.split("  ")
             self.assertEqual(digest, hashlib.sha256((directory / name).read_bytes()).hexdigest())
         self.assertEqual(len(result.read_text().splitlines()), 8)
-        self.assertEqual(release.checksums(directory, "v0.1.0").read_bytes(), result.read_bytes())
+        original = result.read_bytes()
+        for tag in ("0.1.0", "v0.1.0", "Vvv0.1.0"):
+            with self.subTest(tag=tag):
+                self.assertEqual(release.checksums(directory, tag).read_bytes(), original)
 
     @patch.dict(os.environ, {"WALLY_AUTH_TOKEN": "test-token"})
     @patch.object(wally.subprocess, "run")

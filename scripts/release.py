@@ -15,22 +15,28 @@ PLATFORMS = {
     "macos-x86_64": ("x86_64-apple-darwin", ""),
     "macos-aarch64": ("aarch64-apple-darwin", ""),
 }
-TAG_PATTERN = re.compile(
-    r"v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
+VERSION_PATTERN = re.compile(
+    r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
     r"(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?"
 )
 
 
+def normalize_version(value: str) -> str:
+    """Ignore leading v/V prefixes without altering prerelease identifiers."""
+    version = value.lstrip("vV")
+    if not VERSION_PATTERN.fullmatch(version):
+        raise ValueError("release version must be MAJOR.MINOR.PATCH with an optional SemVer prerelease and v prefix")
+    return version
+
+
 def validate(root: Path, tag: str) -> str:
-    if not TAG_PATTERN.fullmatch(tag):
-        raise ValueError("release tag must be vMAJOR.MINOR.PATCH with an optional SemVer prerelease")
-    version = tag[1:]
+    version = normalize_version(tag)
     for filename in ("Cargo.toml", "imposter-render/wally.toml"):
         manifest = tomllib.loads((root / filename).read_text(encoding="utf-8"))
-        if manifest["package"]["version"] != version:
+        if normalize_version(manifest["package"]["version"]) != version:
             raise ValueError(f"{filename} version must match {tag}")
     lock = tomllib.loads((root / "Cargo.lock").read_text(encoding="utf-8"))
-    versions = [p["version"] for p in lock["package"] if p["name"] == "imposter-baker"]
+    versions = [normalize_version(p["version"]) for p in lock["package"] if p["name"] == "imposter-baker"]
     if versions != [version]:
         raise ValueError("Cargo.lock must contain the matching imposter-baker version; run cargo check")
     return version
@@ -59,9 +65,7 @@ def package(root: Path, tag: str, platform: str, output: Path) -> Path:
 
 
 def checksums(directory: Path, tag: str) -> Path:
-    if not TAG_PATTERN.fullmatch(tag):
-        raise ValueError("invalid release tag")
-    version = tag[1:]
+    version = normalize_version(tag)
     expected = {f"imposter-baker-{version}-{p}.zip" for p in PLATFORMS}
     expected.update(("imposter-render.zip", "imposter-render.rbxm", "demo.rbxl"))
     actual = {p.name for p in directory.iterdir() if p.is_file() and p.name != "SHA256SUMS"}

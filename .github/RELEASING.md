@@ -29,6 +29,8 @@ The CLI and runtime package currently share one version. Before tagging:
    git push origin v0.1.0
    ```
 
+Tags may use either `0.1.0` or `v0.1.0`. Version comparisons strip all leading `v`/`V` characters from the tag, both manifests, and the CLI lockfile entry; the remaining version and prerelease identifiers must match exactly. Archive names always use the version without the prefix. Git checkout and release operations retain the actual tag name. Both prefixed and unprefixed version tags trigger the release workflow.
+
 The tagged commit must contain the release workflows and scripts. You can also choose **Actions → Release → Run workflow**, entering an existing version tag. Both entry points verify the exact tag commit, run full CI against that tag, then build native binaries for:
 
 | Platform | Architecture |

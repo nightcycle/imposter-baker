@@ -1,11 +1,11 @@
 name: Release
 on:
   push:
-    tags: ['v*']
+    tags: ['v*', 'V*', '[0-9]*']
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing version tag to release (for example v0.1.0)
+        description: Existing version tag to release (for example 0.1.0 or v0.1.0)
         required: true
         type: string
 permissions:
