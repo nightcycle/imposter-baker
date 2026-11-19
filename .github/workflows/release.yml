@@ -138,28 +138,12 @@ jobs:
           pattern: release-*
           path: artifacts
           merge-multiple: true
-      - name: Verify complete artifact set and generate SHA-256 checksums
-        env:
-          TAG: ${{ needs.metadata.outputs.tag }}
-        run: python scripts/release.py checksums "$TAG" artifacts
-      - name: Publish tagged GitHub release
+      - name: Verify artifacts and publish tagged GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.metadata.outputs.tag }}
-          PRERELEASE: ${{ needs.metadata.outputs.prerelease }}
-        run: |
-          if gh release view "$TAG" --json isDraft --jq '.isDraft' > release-state.txt; then
-            if [[ "$(cat release-state.txt)" != "true" ]]; then
-              echo "Release $TAG is already published; refusing to replace its assets."
-              exit 1
-            fi
-            gh release upload "$TAG" artifacts/* --clobber
-          else
-            gh release create "$TAG" --draft --verify-tag --prerelease="$PRERELEASE" --title "$TAG" --generate-notes artifacts/*
-          fi
-          if [[ "$PRERELEASE" == "true" ]]; then latest=false; else latest=true; fi
-          gh release edit "$TAG" --draft=false --prerelease="$PRERELEASE" --latest="$latest"
+        run: python scripts/release.py publish "$TAG" artifacts
   wally:
     needs: [metadata, publish]
     if: vars.PUBLISH_WALLY == 'true' && needs.metadata.outputs.prerelease == 'false'

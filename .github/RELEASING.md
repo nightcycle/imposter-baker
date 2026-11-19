@@ -41,7 +41,7 @@ The tagged commit must contain the release workflows and scripts. You can also c
 
 Each ZIP contains the executable, license, and README at the archive root. Unix executable permissions are preserved. Filenames follow `imposter-baker-<version>-<platform>-<architecture>.zip` so Rokit can select the correct executable.
 
-The release also includes `imposter-render.zip`, `imposter-render.rbxm`, `demo.rbxl`, and `SHA256SUMS`. The demo embeds the package and baked texture pixels and is ready for Studio Play mode. Checksums are generated only after all eight binary/package/demo artifacts are present. The workflow first creates or resumes a draft, attaches every asset, then publishes it. Retrying can replace assets on an unfinished draft; already-published release assets are never replaced by this workflow.
+The release also includes `imposter-render.zip`, `imposter-render.rbxm`, `demo.rbxl`, and `SHA256SUMS`. The demo embeds the package and baked texture pixels and is ready for Studio Play mode. Checksums are generated only after all eight binary/package/demo artifacts are present. If the release does not exist, the workflow creates a draft with the assets and then publishes it. If it already exists, whether draft or published, the workflow uploads the assets to it and replaces same-named assets on retries. An existing published release is not an error; its title and release notes are preserved.
 
 Tags such as `v0.2.0-rc.1` publish GitHub prereleases and do not change the latest stable release. Set the same prerelease version in both manifests and the lockfile. Automatic Wally publication is limited to stable versions.
 
@@ -79,3 +79,5 @@ python scripts/release.py checksums v0.1.0 artifacts
 ```
 
 The package command validates both manifests and the lockfile, uses the selected target's executable, and normalizes archive timestamps. The checksum command rejects missing or unexpected files. Running these commands locally does not publish anything.
+
+`python scripts/release.py publish <tag> <artifact-directory>` performs the same version and complete-asset checks, generates `SHA256SUMS`, and uploads to GitHub using the authenticated `gh` CLI. It creates a release when missing or updates an existing draft/published release. This command does publish and can replace same-named assets. Rerunning an old Actions run uses that run's original workflow revision; the updated publishing helper must be present in the checkout used by the publish job.

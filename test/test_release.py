@@ -9,7 +9,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
-from subprocess import CompletedProcess
+from subprocess import CalledProcessError, CompletedProcess
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -131,6 +131,81 @@ class ReleaseTests(unittest.TestCase):
     def test_missing_wally_secret_fails_before_authentication(self, run):
         with self.assertRaises(RuntimeError):
             wally.publish()
+        run.assert_not_called()
+
+    def release_artifacts(self, version="0.1.0"):
+        directory = self.root / "dist"
+        directory.mkdir(exist_ok=True)
+        names = [f"imposter-baker-{version}-{platform}.zip" for platform in release.PLATFORMS]
+        names.extend(("imposter-render.zip", "imposter-render.rbxm", "demo.rbxl"))
+        for name in names:
+            (directory / name).write_bytes(b"release artifact")
+        return directory
+
+    @patch.object(release.subprocess, "run")
+    def test_publish_updates_both_draft_and_published_releases(self, run):
+        directory = self.release_artifacts()
+        for state in ('{"isDraft":true}', '{"isDraft":false}'):
+            with self.subTest(state=state):
+                run.reset_mock()
+                run.side_effect = [CompletedProcess([], 0, state, ""), CompletedProcess([], 0), CompletedProcess([], 0)]
+                release.publish(self.root, "v0.1.0", directory)
+                commands = [call.args[0] for call in run.call_args_list]
+                self.assertEqual([command[2] for command in commands], ["view", "upload", "edit"])
+                self.assertEqual(commands[1][3], "v0.1.0")
+                self.assertIn("--clobber", commands[1])
+                self.assertEqual(
+                    set(commands[1][4:-1]),
+                    {str(path.resolve()) for path in directory.iterdir()},
+                )
+                self.assertEqual(len(commands[1][4:-1]), 9)
+                self.assertIn("--draft=false", commands[2])
+                self.assertIn("--prerelease=false", commands[2])
+                self.assertIn("--latest=true", commands[2])
+                self.assertNotIn("--title", commands[2])
+                self.assertNotIn("--notes", commands[2])
+
+    @patch.object(release.subprocess, "run")
+    def test_publish_creates_missing_release_before_publishing(self, run):
+        directory = self.release_artifacts()
+        run.side_effect = [CompletedProcess([], 1, "", "release not found"), CompletedProcess([], 0), CompletedProcess([], 0)]
+        release.publish(self.root, "0.1.0", directory)
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertEqual([command[2] for command in commands], ["view", "create", "edit"])
+        self.assertIn("--draft", commands[1])
+        self.assertIn("--verify-tag", commands[1])
+        self.assertIn(str((directory / "SHA256SUMS").resolve()), commands[1])
+
+    @patch.object(release.subprocess, "run")
+    def test_publish_prerelease_does_not_mark_it_latest(self, run):
+        version = "0.1.0-preview.1"
+        for name in ("Cargo.toml", "imposter-render/wally.toml"):
+            (self.root / name).write_text(f'[package]\nversion = "{version}"\n', encoding="utf-8")
+        (self.root / "Cargo.lock").write_text(
+            f'[[package]]\nname = "imposter-baker"\nversion = "{version}"\n', encoding="utf-8"
+        )
+        run.side_effect = [CompletedProcess([], 0, '{"isDraft":false}', ""), CompletedProcess([], 0), CompletedProcess([], 0)]
+        release.publish(self.root, "Vv" + version, self.release_artifacts(version))
+        edit = run.call_args.args[0]
+        self.assertEqual(edit[3], "Vv" + version)
+        self.assertIn("--prerelease=true", edit)
+        self.assertIn("--latest=false", edit)
+
+    @patch.object(release.subprocess, "run")
+    def test_publish_upload_failure_stops_before_release_edit(self, run):
+        directory = self.release_artifacts()
+        run.side_effect = [CompletedProcess([], 0, '{"isDraft":false}', ""), CalledProcessError(1, ["gh", "release", "upload"])]
+        with self.assertRaises(CalledProcessError):
+            release.publish(self.root, "v0.1.0", directory)
+        self.assertEqual(run.call_count, 2)
+        self.assertTrue(run.call_args.kwargs["check"])
+
+    @patch.object(release.subprocess, "run")
+    def test_publish_rejects_incomplete_artifacts_before_contacting_github(self, run):
+        directory = self.root / "dist"
+        directory.mkdir()
+        with self.assertRaises(ValueError):
+            release.publish(self.root, "v0.1.0", directory)
         run.assert_not_called()
 
 

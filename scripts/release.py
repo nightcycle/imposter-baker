@@ -1,9 +1,10 @@
-"""Validate versions and assemble Rokit-compatible release assets (Python 3.11+)."""
+"""Validate, assemble, and publish Rokit-compatible release assets (Python 3.11+)."""
 
 import argparse
 import hashlib
 import re
 import stat
+import subprocess
 import tomllib
 import zipfile
 from pathlib import Path
@@ -81,6 +82,32 @@ def checksums(directory: Path, tag: str) -> Path:
     return path
 
 
+def publish(root: Path, tag: str, directory: Path) -> None:
+    version = validate(root, tag)
+    checksums(directory, tag)
+    assets = [str(path.resolve()) for path in sorted(directory.iterdir()) if path.is_file()]
+    prerelease = "true" if "-" in version else "false"
+    latest = "false" if prerelease == "true" else "true"
+    existing = subprocess.run(
+        ["gh", "release", "view", tag, "--json", "isDraft"],
+        capture_output=True, text=True, check=False,
+    )
+    if existing.returncode == 0:
+        # A release created in GitHub's UI can already be published before its
+        # build finishes. Draft and published releases both accept these assets.
+        subprocess.run(["gh", "release", "upload", tag, *assets, "--clobber"], check=True)
+    else:
+        subprocess.run(
+            ["gh", "release", "create", tag, "--draft", "--verify-tag",
+             f"--prerelease={prerelease}", "--title", tag, "--generate-notes", *assets],
+            check=True,
+        )
+    subprocess.run(
+        ["gh", "release", "edit", tag, "--draft=false", f"--prerelease={prerelease}", f"--latest={latest}"],
+        check=True,
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
@@ -94,15 +121,20 @@ def main() -> None:
     sums = commands.add_parser("checksums")
     sums.add_argument("tag")
     sums.add_argument("directory", type=Path)
+    upload = commands.add_parser("publish", help="Upload checked assets to a new or existing GitHub release")
+    upload.add_argument("tag")
+    upload.add_argument("directory", type=Path)
     args = parser.parse_args()
     try:
         if args.command == "validate":
             print(validate(args.root, args.tag))
         elif args.command == "package":
             print(package(args.root, args.tag, args.platform, args.output))
-        else:
+        elif args.command == "checksums":
             print(checksums(args.directory, args.tag))
-    except (ValueError, OSError) as error:
+        else:
+            publish(args.root, args.tag, args.directory)
+    except (ValueError, OSError, subprocess.CalledProcessError) as error:
         parser.exit(1, f"Error: {error}\n")
 
 
