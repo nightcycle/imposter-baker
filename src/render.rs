@@ -16,6 +16,8 @@ pub const LAYERS: [&str; 9] = [
     "albedo",
 ];
 pub type Frame = [RgbaImage; LAYERS.len()];
+// Seven material channels plus the geometric normal before source normal mapping.
+type CaptureSample = [Vec4; 8];
 
 #[derive(Clone, Copy)]
 struct Hit {
@@ -97,7 +99,7 @@ pub fn render(scene: &Scene, index: u32, samples: u32) -> Result<Frame> {
         }
     }
     let count = (n * n) as usize;
-    let mut sums = vec![[Vec4::ZERO; 7]; count];
+    let mut sums = vec![[Vec4::ZERO; 8]; count];
     let offsets: &[Vec2] = if samples == 1 {
         &[Vec2::new(0.5, 0.5)]
     } else {
@@ -158,7 +160,7 @@ pub fn render(scene: &Scene, index: u32, samples: u32) -> Result<Frame> {
             .zip(hits.par_iter_mut())
             .for_each(|(sum, hits)| {
                 hits.sort_by(|a, b| a.depth.total_cmp(&b.depth));
-                let mut result = [Vec4::ZERO; 7];
+                let mut result = [Vec4::ZERO; 8];
                 for hit in hits.iter() {
                     let tri = &triangles[hit.triangle];
                     let o = &scene.objects[tri.object];
@@ -185,6 +187,11 @@ pub fn render(scene: &Scene, index: u32, samples: u32) -> Result<Frame> {
                     }) * vc.truncate();
                     let mut normal = (v[0].normal * w.x + v[1].normal * w.y + v[2].normal * w.z)
                         .normalize_or_zero();
+                    let mut geometric =
+                        Vec3::new(normal.dot(right), normal.dot(up), normal.dot(toward));
+                    if geometric.z < 0.0 {
+                        geometric = -geometric;
+                    }
                     if let Some(map) = &m.normal_map {
                         let nt = map.sample(uv).truncate() * 2.0 - Vec3::ONE;
                         let tangent =
@@ -227,18 +234,25 @@ pub fn render(scene: &Scene, index: u32, samples: u32) -> Result<Frame> {
                         Vec3::ONE,
                         Vec3::splat(depth),
                         emissive,
+                        geometric * 0.5 + Vec3::splat(0.5),
                     ];
-                    for layer in 0..7 {
+                    for layer in 0..8 {
                         result[layer] =
                             values[layer].extend(1.0) * alpha + result[layer] * (1.0 - alpha);
                     }
                 }
-                for layer in 0..7 {
+                for layer in 0..8 {
                     sum[layer] += result[layer] / samples as f32;
                 }
             });
     }
     let occlusion = capture_occlusion(&sums, n, s.ambient_occlusion_radius_ratio);
+    apply_depth_normals(
+        &mut sums,
+        n,
+        s.depth_normal_strength,
+        s.depth_normal_radius_ratio,
+    );
     let tile = s.tile_size();
     let mut frame: Frame = std::array::from_fn(|_| RgbaImage::new(tile, tile));
     for y in 0..n {
@@ -293,10 +307,100 @@ pub fn render(scene: &Scene, index: u32, samples: u32) -> Result<Frame> {
     Ok(frame)
 }
 
+/// Add a finite-width bevel approximation at visible depth discontinuities.
+/// Distances use bounds-diagonal units and depth stays floating point.
+/// Subtract slope already represented by geometric normals, keeping source
+/// normal-map detail separate from the height field.
+fn apply_depth_normals(samples: &mut [CaptureSample], resolution: u32, strength: f32, radius: f32) {
+    if strength == 0.0 || radius == 0.0 {
+        return;
+    }
+    let n = resolution as i32;
+    let radius_px = (radius * resolution as f32).round().max(1.0) as i32;
+    let mut distances: Vec<i32> = [0.25, 0.5, 0.75, 1.0]
+        .map(|fraction| (fraction * radius_px as f32).round().max(1.0) as i32)
+        .into();
+    distances.dedup();
+    let unpack = |value: Vec4| (value.truncate() / value.w * 2.0 - Vec3::ONE).normalize_or(Vec3::Z);
+    let normals: Vec<Vec4> = samples
+        .par_iter()
+        .enumerate()
+        .map(|(index, center)| {
+            // Coverage edges and translucent layers do not define a solid height field.
+            if center[0].w < 0.999 {
+                return center[1];
+            }
+            let geometric = unpack(center[7]);
+            if geometric.z < 0.1 {
+                return center[1];
+            }
+            let depth = center[5].x / center[5].w;
+            let x = index as i32 % n;
+            let y = index as i32 / n;
+            let mut gradient = Vec2::ZERO;
+            for axis in 0..2 {
+                let mut numerator = 0.0;
+                let mut denominator = 0.0;
+                for distance in &distances {
+                    for sign in [-1, 1] {
+                        let delta_px = distance * sign;
+                        let (sx, sy) = if axis == 0 {
+                            (x + delta_px, y)
+                        } else {
+                            (x, y + delta_px)
+                        };
+                        if sx < 0 || sy < 0 || sx >= n || sy >= n {
+                            continue;
+                        }
+                        let neighbor = &samples[(sy * n + sx) as usize];
+                        if neighbor[0].w < 0.999 {
+                            continue;
+                        }
+                        let neighbor_geometric = unpack(neighbor[7]);
+                        if neighbor_geometric.z < 0.1 {
+                            continue;
+                        }
+                        let delta = delta_px as f32 / resolution as f32;
+                        // Depth grows away from the camera; image Y grows downward.
+                        let direction = if axis == 0 { 1.0 } else { -1.0 };
+                        let expected_slope = direction
+                            * 0.5
+                            * (geometric[axis] / geometric.z
+                                + neighbor_geometric[axis] / neighbor_geometric.z);
+                        let residual =
+                            neighbor[5].x / neighbor[5].w - depth - expected_slope * delta;
+                        let weight = 1.0 - *distance as f32 / (radius_px + 1) as f32;
+                        if residual.abs() > 1e-6 {
+                            numerator += weight * delta * residual;
+                        }
+                        denominator += weight * delta * delta;
+                    }
+                }
+                if denominator > 0.0 {
+                    gradient[axis] = numerator / denominator;
+                }
+            }
+            if gradient == Vec2::ZERO {
+                return center[1];
+            }
+            let relief = Vec3::new(gradient.x * strength, -gradient.y * strength, 1.0).normalize();
+            // Reoriented normal mapping: rotate the existing normal by the relief.
+            // https://blog.selfshadow.com/publications/blending-in-detail/
+            let t = relief + Vec3::Z;
+            let u = unpack(center[1]) * Vec3::new(-1.0, -1.0, 1.0);
+            let combined = (t * t.dot(u) / t.z - u).normalize_or(Vec3::Z);
+            (combined * 0.5 + Vec3::splat(0.5)).extend(1.0) * center[1].w
+        })
+        .collect();
+    for (sample, normal) in samples.iter_mut().zip(normals) {
+        sample[1] = normal;
+    }
+}
+
 /// Horizon occlusion of visible geometry in capture space. Flat surfaces and
 /// transparent background do not occlude; nearby raised surfaces darken recesses.
 /// This deliberately contains no directional sun light or cast ground shadow.
-fn capture_occlusion(samples: &[[Vec4; 7]], resolution: u32, radius: f32) -> Vec<f32> {
+fn capture_occlusion(samples: &[CaptureSample], resolution: u32, radius: f32) -> Vec<f32> {
     if radius == 0.0 {
         return vec![1.0; samples.len()];
     }
@@ -391,10 +495,102 @@ fn dilate(im: &mut RgbaImage, passes: u32) {
 mod tests {
     use super::*;
 
+    fn relief_fixture(n: usize) -> Vec<CaptureSample> {
+        let mut pixel = [Vec4::ZERO; 8];
+        pixel[0] = Vec4::ONE;
+        pixel[1] = Vec4::new(0.5, 0.5, 1.0, 1.0);
+        pixel[5] = Vec4::new(0.5, 0.5, 0.5, 1.0);
+        pixel[7] = pixel[1];
+        vec![pixel; n * n]
+    }
+
+    #[test]
+    fn relief_edges_have_opengl_directions_and_leave_flat_interiors_unchanged() {
+        let n = 64;
+        let mut samples = relief_fixture(n);
+        for y in 20..44 {
+            for x in 20..44 {
+                samples[y * n + x][5].x = 0.4;
+            }
+        }
+        let original = samples.clone();
+        apply_depth_normals(&mut samples, n as u32, 0.65, 0.05);
+        assert!(samples[32 * n + 20][1].x < 0.25, "left edge points left");
+        assert!(samples[32 * n + 43][1].x > 0.75, "right edge points right");
+        assert!(samples[20 * n + 32][1].y > 0.75, "top edge points up");
+        assert!(samples[43 * n + 32][1].y < 0.25, "bottom edge points down");
+        assert_eq!(samples[32 * n + 32], original[32 * n + 32]);
+        for (pixel, before) in samples.iter().zip(&original) {
+            for layer in [0, 2, 3, 4, 5, 6, 7] {
+                assert_eq!(pixel[layer], before[layer]);
+            }
+            let normal = pixel[1].truncate() * 2.0 - Vec3::ONE;
+            assert!(normal.is_finite() && (normal.length() - 1.0).abs() < 1e-5);
+        }
+        for (strength, radius) in [(0.0, 0.05), (0.65, 0.0)] {
+            let mut disabled = original.clone();
+            apply_depth_normals(&mut disabled, n as u32, strength, radius);
+            assert_eq!(disabled, original);
+        }
+    }
+
+    #[test]
+    fn relief_does_not_double_tilted_planes_or_erase_source_normal_detail() {
+        let n = 32;
+        let mut samples = relief_fixture(n);
+        let geometric = Vec3::new(0.3, -0.2, 1.0).normalize();
+        let textured = Vec3::new(0.1, 0.4, 1.0).normalize();
+        for (index, pixel) in samples.iter_mut().enumerate() {
+            let (x, y) = ((index % n) as f32 / n as f32, (index / n) as f32 / n as f32);
+            pixel[5].x = 0.3 + geometric.x / geometric.z * x - geometric.y / geometric.z * y;
+            pixel[7] = (geometric * 0.5 + Vec3::splat(0.5)).extend(1.0);
+            pixel[1] = (textured * 0.5 + Vec3::splat(0.5)).extend(1.0);
+        }
+        let original = samples.clone();
+        apply_depth_normals(&mut samples, n as u32, 1.0, 0.1);
+        assert_eq!(samples, original);
+    }
+
+    #[test]
+    fn relief_ignores_background_and_partial_coverage() {
+        let n = 32;
+        for coverage in [0.0, 0.5, 0.998] {
+            let mut samples = relief_fixture(n);
+            for y in 0..n {
+                for x in 0..16 {
+                    samples[y * n + x][0].w = coverage;
+                    samples[y * n + x][5].x = 0.1;
+                }
+            }
+            let original = samples.clone();
+            apply_depth_normals(&mut samples, n as u32, 1.0, 0.1);
+            assert_eq!(samples, original);
+        }
+    }
+
+    #[test]
+    fn relief_preserves_texture_variation_along_an_edge() {
+        let n = 32;
+        let mut samples = relief_fixture(n);
+        for y in 0..n {
+            for x in 0..16 {
+                samples[y * n + x][5].x = 0.4;
+            }
+        }
+        let detail = Vec3::new(0.0, 0.4, 1.0).normalize();
+        samples[16 * n + 15][1] = (detail * 0.5 + Vec3::splat(0.5)).extend(1.0);
+        apply_depth_normals(&mut samples, n as u32, 0.65, 0.05);
+        let textured = samples[16 * n + 15][1].truncate() * 2.0 - Vec3::ONE;
+        let plain = samples[17 * n + 15][1].truncate() * 2.0 - Vec3::ONE;
+        assert!(textured.x > 0.2 && plain.x > 0.2);
+        assert!((textured.y - detail.y).abs() < 1e-5);
+        assert_eq!(plain.y, 0.0);
+    }
+
     #[test]
     fn occlusion_preserves_flat_surfaces_and_darkens_recesses_without_background_halos() {
         let n = 32;
-        let mut pixel = [Vec4::ZERO; 7];
+        let mut pixel = [Vec4::ZERO; 8];
         pixel[0] = Vec4::ONE;
         pixel[1] = Vec4::new(0.5, 0.5, 1.0, 1.0);
         pixel[5] = Vec4::splat(0.5);

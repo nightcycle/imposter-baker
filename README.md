@@ -44,6 +44,8 @@ Export exactly one root Model, Folder, or BasePart. Place attributes on that roo
 | `TiltOffset` | number, degrees | 0 | finite within −180…180; added after sampling the tilt range |
 | `AmbientOcclusionStrength` | number | 0.75 | 0…1; cavity shading mixed into the runtime color map |
 | `AmbientOcclusionRadiusRatio` | number | 0.08 | 0…0.5; sampling radius as a fraction of bounds diagonal |
+| `DepthNormalStrength` | number | 0 | 0…1; optional relief normals at visible depth steps, 0 preserves geometric/source normals |
+| `DepthNormalRadiusRatio` | number | 0.008 | 0…0.1; relief sampling radius as a fraction of bounds diagonal, 0 disables relief |
 
 At most 4096 shots are accepted. Raster memory estimates are checked before allocating output images. The default 512 MiB budget is deliberately conservative and includes a reserve for depth overlap; use `--max-memory-mib` to increase it. Asset decoding has separate per-asset limits.
 
@@ -118,6 +120,14 @@ Use `--cache-dir` to change the cache. Missing/inaccessible assets and unsupport
 Supports static MeshParts with Roblox mesh formats v1–v5, file SpecialMeshes, block/sphere/cylinder Parts, WedgeParts, CornerWedgeParts, and several primitive SpecialMesh types. Reads legacy texture IDs and modern Content properties. Handles SurfaceAppearance color/normal/roughness/metalness/emissive maps and alpha modes. Skeleton meshes use their stored bind geometry.
 
 This is a standalone material capture renderer. Roblox lighting, shadows, built-in procedural material textures, MaterialVariants, skinning, particles, terrain, GUI, and post effects are not reproduced. Decals and tiled Texture instances emit warnings. Unions/negations and trusses fail with a conversion instruction. Convert unsupported geometry to MeshParts first. Source surfaces are rasterized two-sided, which is useful for foliage but can differ from Studio backface culling. There is a checked limit of 256 overlapping surfaces per sample. Extremely close views remain an approximation because the capture is orthographic.
+
+### Relief normals for flat facades
+
+A straight-on capture of parallel box faces has identical normals even when the faces are at different depths. Set `DepthNormalStrength = 0.65` on the root to turn those depth steps into finite-width relief in the normal map. `DepthNormalRadiusRatio` controls the transition width (default 0.008 of the bounds diagonal, rounded to at least one capture pixel). A larger radius spreads the transition and reduces its slope; strength scales the slope. Zero strength or radius leaves the original normal map unchanged.
+
+This pass uses floating-point depth before PNG quantization and subtracts slopes already represented by the geometric normals, so a tilted plane is not strengthened twice. It combines the remaining relief with captured/source texture normals using [reoriented normal mapping](https://blog.selfshadow.com/publications/blending-in-detail/). Transparent background and partially covered/translucent pixels are excluded. Other maps, including occlusion and emission, are unchanged. Both settings are recorded in the JSON manifest.
+
+Relief is a shading approximation for visible depth discontinuities, not recovered hidden geometry. It adds no parallax, silhouette displacement, or cast shadows. Author actual bevels if those should appear accurately in geometric normal captures; keep this option disabled for ordinary multi-view imposters unless the approximation suits the asset.
 
 ## Tests and demos
 

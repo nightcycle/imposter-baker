@@ -84,7 +84,7 @@ pub fn bake(scene: &scene::Scene, output: &Path, options: &BakeOptions) -> Resul
     // Output buffers + sample accumulators + up to 256 compact depth hits per
     // pixel + triangle/geometry allowance. Checked before image allocation.
     let estimate = pixels * (LAYERS.len() as u64 * 4)
-        + s.max_resolution_px as u64 * s.max_resolution_px as u64 * (112 + 24 + 256 * 24 + 4)
+        + s.max_resolution_px as u64 * s.max_resolution_px as u64 * (128 + 16 + 24 + 256 * 24 + 4)
         + scene
             .objects
             .iter()

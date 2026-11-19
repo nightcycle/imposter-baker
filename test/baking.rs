@@ -124,6 +124,73 @@ fn layout_and_camera_basis_contract() {
 }
 
 #[test]
+fn relief_attributes_validate_and_old_manifests_keep_geometric_normals() {
+    let attrs = Attributes::new()
+        .with("DepthNormalStrength", 0.65)
+        .with("DepthNormalRadiusRatio", 0.02);
+    let settings = Settings::from_attributes(Some(&attrs)).unwrap();
+    assert_eq!(settings.depth_normal_strength, 0.65);
+    assert_eq!(settings.depth_normal_radius_ratio, 0.02);
+    for (name, invalid_max) in [
+        ("DepthNormalStrength", 1.1),
+        ("DepthNormalRadiusRatio", 0.11),
+    ] {
+        for value in [-1.0, invalid_max, f64::NAN, f64::INFINITY] {
+            assert!(Settings::from_attributes(Some(&Attributes::new().with(name, value))).is_err());
+        }
+        assert!(Settings::from_attributes(Some(&Attributes::new().with(name, "wrong"))).is_err());
+    }
+    let mut old = serde_json::to_value(Settings::default()).unwrap();
+    old.as_object_mut().unwrap().remove("depthNormalStrength");
+    old.as_object_mut()
+        .unwrap()
+        .remove("depthNormalRadiusRatio");
+    assert_eq!(
+        serde_json::from_value::<Settings>(old).unwrap(),
+        Settings::default()
+    );
+    let saved = serde_json::to_value(&settings).unwrap();
+    assert!((saved["depthNormalStrength"].as_f64().unwrap() - 0.65).abs() < 1e-6);
+    assert_eq!(serde_json::from_value::<Settings>(saved).unwrap(), settings);
+}
+
+#[test]
+fn relief_on_overlapping_boxes_changes_only_normals() {
+    let mut scene = cube();
+    scene.settings.max_resolution_px = 64;
+    scene.settings.depth_normal_radius_ratio = 0.04;
+    let mut raised = geometry::block(false, false);
+    for vertex in &mut raised.vertices {
+        vertex.position = vertex.position * Vec3::new(0.4, 0.4, 0.2) + Vec3::new(0.0, 0.0, 0.6);
+    }
+    scene.bounds_size.z = 1.4;
+    scene.objects.push(Object {
+        geometry: raised,
+        material: cube().objects.remove(0).material,
+    });
+    let original = render::render(&scene, 0, 4).unwrap();
+    assert!(
+        original[1]
+            .pixels()
+            .filter(|p| p[3] == 255)
+            .all(|p| p.0 == [128, 128, 255, 255])
+    );
+    scene.settings.depth_normal_strength = 0.65;
+    let relief = render::render(&scene, 0, 4).unwrap();
+    assert!(
+        relief[1]
+            .pixels()
+            .any(|p| p[3] == 255 && p[0].abs_diff(128) > 20)
+    );
+    for layer in [0, 2, 3, 4, 5, 6, 7, 8] {
+        assert_eq!(
+            original[layer], relief[layer],
+            "only the normal map should change"
+        );
+    }
+}
+
+#[test]
 fn tilt_offset_attributes_bake_top_down_and_round_trip_layouts() {
     let attributes = Attributes::new()
         .with("PanShotCount", 1.0)

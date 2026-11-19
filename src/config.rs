@@ -17,6 +17,10 @@ pub struct Settings {
     pub ambient_occlusion_strength: f32,
     #[serde(default = "default_ao_radius")]
     pub ambient_occlusion_radius_ratio: f32,
+    #[serde(default)]
+    pub depth_normal_strength: f32,
+    #[serde(default = "default_depth_normal_radius")]
+    pub depth_normal_radius_ratio: f32,
 }
 
 fn default_ao_strength() -> f32 {
@@ -24,6 +28,9 @@ fn default_ao_strength() -> f32 {
 }
 fn default_ao_radius() -> f32 {
     0.08
+}
+fn default_depth_normal_radius() -> f32 {
+    0.008
 }
 
 impl Default for Settings {
@@ -37,6 +44,8 @@ impl Default for Settings {
             tilt_offset: 0.0,
             ambient_occlusion_strength: default_ao_strength(),
             ambient_occlusion_radius_ratio: default_ao_radius(),
+            depth_normal_strength: 0.0,
+            depth_normal_radius_ratio: default_depth_normal_radius(),
         }
     }
 }
@@ -83,6 +92,8 @@ impl Settings {
                     "AmbientOcclusionRadiusRatio",
                     &mut s.ambient_occlusion_radius_ratio,
                 ),
+                ("DepthNormalStrength", &mut s.depth_normal_strength),
+                ("DepthNormalRadiusRatio", &mut s.depth_normal_radius_ratio),
             ] {
                 if let Some(value) = a.get(name) {
                     *target = match value {
@@ -115,6 +126,16 @@ impl Settings {
         );
         ensure!(self.padding_px <= 64, "PaddingPx must be 0..64");
         let [lo, hi] = self.tilt_constraints;
+        ensure!(
+            self.depth_normal_strength.is_finite()
+                && (0.0..=1.0).contains(&self.depth_normal_strength),
+            "DepthNormalStrength must be in 0..1"
+        );
+        ensure!(
+            self.depth_normal_radius_ratio.is_finite()
+                && (0.0..=0.1).contains(&self.depth_normal_radius_ratio),
+            "DepthNormalRadiusRatio must be in 0..0.1 of the bounds diagonal"
+        );
         ensure!(
             self.ambient_occlusion_strength.is_finite()
                 && (0.0..=1.0).contains(&self.ambient_occlusion_strength),
