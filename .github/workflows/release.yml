@@ -24,11 +24,11 @@ jobs:
       tag: ${{ steps.version.outputs.tag }}
       prerelease: ${{ steps.version.outputs.prerelease }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 0
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - name: Validate versions and exact tag commit
@@ -73,10 +73,10 @@ jobs:
             platform: macos-aarch64
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.metadata.outputs.tag }}
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - uses: dtolnay/rust-toolchain@stable
@@ -89,7 +89,7 @@ jobs:
           TAG: ${{ needs.metadata.outputs.tag }}
           PLATFORM: ${{ matrix.platform }}
         run: python scripts/release.py package "$TAG" "$PLATFORM"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-imposter-baker-${{ matrix.platform }}
           path: dist/*.zip
@@ -99,7 +99,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.metadata.outputs.tag }}
       - uses: CompeyDev/setup-rokit@v0.2.1
@@ -114,7 +114,7 @@ jobs:
           mkdir -p test/tooling
           rojo build demo.project.json --output test/tooling/demo-base.rbxl
           cargo run --locked --example build_demo -- test/tooling/demo-base.rbxl dist/demo.rbxl
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-imposter-render
           path: dist/*
@@ -126,14 +126,14 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.metadata.outputs.tag }}
           fetch-depth: 0
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: release-*
           path: artifacts
