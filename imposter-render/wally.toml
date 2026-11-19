@@ -1,6 +1,6 @@
 [package]
 name = "nightcycle/imposter-render"
-version = "0.1.0"
+version = "0.1.1"
 description = "Typed shared EditableMesh / PBR atlas runtime for imposter-baker"
 license = "Apache-2.0"
 authors = ["nightcycle"]
